@@ -143,6 +143,15 @@ class Platform:
         # be used as the default dtype fallback for the current platform,
         # when encountering unsupported dtypes in "auto" dtype.
         return [torch.bfloat16, torch.float16, torch.float32]
+    
+    @property
+    def pass_key(self) -> str:
+        return ""
+    
+    @classmethod
+    def get_pass_manager_cls(cls) -> str:
+        """Get the pass manager class of a device."""
+        return ""
 
     def is_cuda(self) -> bool:
         return self._enum == PlatformEnum.CUDA

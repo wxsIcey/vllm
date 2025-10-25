@@ -127,13 +127,13 @@ def xpu_platform_plugin() -> Optional[str]:
     logger.debug("Checking if XPU platform is available.")
     try:
         # installed IPEX if the machine has XPUs.
-        import intel_extension_for_pytorch  # noqa: F401
+        # import intel_extension_for_pytorch  # noqa: F401
         import torch
         if supports_xccl():
             dist_backend = "xccl"
         else:
             dist_backend = "ccl"
-            import oneccl_bindings_for_pytorch  # noqa: F401
+            # import oneccl_bindings_for_pytorch  # noqa: F401
 
         if hasattr(torch, 'xpu') and torch.xpu.is_available():
             is_xpu = True

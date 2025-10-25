@@ -30,6 +30,8 @@ logger = init_logger(__name__)
 
 
 def make_compiler(compilation_config: CompilationConfig) -> CompilerInterface:
+    if compilation_config.oot_compiler:
+        return resolve_obj_by_qualname(compilation_config.oot_compiler)()
     if compilation_config.use_inductor:
         # Use standalone compile only if requested, version is new enough,
         # and the symbol actually exists in this PyTorch build.
@@ -440,7 +442,10 @@ class VllmBackend:
         self.prefix = prefix or model_tag
 
         # Passes to run on the graph post-grad.
-        self.post_grad_pass_manager = PostGradPassManager()
+        self.pass_manager = resolve_obj_by_qualname(
+            current_platform.get_pass_manager_cls()
+        )()
+        self.pass_key = current_platform.pass_key
 
         self.sym_tensor_indices = []
         self.input_buffers = []
@@ -453,25 +458,24 @@ class VllmBackend:
 
         # `torch.compile` is JIT compiled, so we don't need to
         # do anything here
-
+        
     def configure_post_pass(self):
         config = self.compilation_config
-        self.post_grad_pass_manager.configure(self.vllm_config)
+        self.pass_manager.configure(self.vllm_config)
 
         # Post-grad custom passes are run using the post_grad_custom_post_pass
         # hook. If a pass for that hook exists, add it to the pass manager.
         inductor_config = config.inductor_compile_config
-        PASS_KEY = "post_grad_custom_post_pass"
-        if PASS_KEY in inductor_config:
-            if isinstance(inductor_config[PASS_KEY], PostGradPassManager):
+        if self.pass_key in inductor_config:
+            if isinstance(inductor_config[self.pass_key], PostGradPassManager):
                 # PassManager already added to config, make sure it's correct
-                assert (inductor_config[PASS_KEY].uuid() ==
-                        self.post_grad_pass_manager.uuid())
+                assert inductor_config[self.pass_key].uuid() == self.pass_manager.uuid()
             else:
                 # Config should automatically wrap all inductor passes
-                assert isinstance(inductor_config[PASS_KEY], InductorPass)
-                self.post_grad_pass_manager.add(inductor_config[PASS_KEY])
-        inductor_config[PASS_KEY] = self.post_grad_pass_manager
+                assert isinstance(inductor_config[self.pass_key], InductorPass)
+                self.pass_manager.add(inductor_config[self.pass_key])
+        inductor_config[self.pass_key] = self.pass_manager
+
 
     def __call__(self, graph: fx.GraphModule, example_inputs) -> Callable:
 

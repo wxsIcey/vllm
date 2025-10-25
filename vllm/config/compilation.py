@@ -343,6 +343,8 @@ class CompilationConfig:
     """files that are traced for compilation"""
     compilation_time: float = field(default=0.0, init=False)
     """time taken for compilation"""
+    
+    oot_compiler: str | None = None
 
     static_forward_context: dict[str, Any] = field(default_factory=dict,
                                                    init=False)
