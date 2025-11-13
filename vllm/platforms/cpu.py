@@ -84,6 +84,10 @@ class CpuPlatform(Platform):
             return [torch.float16, torch.float32]
         # x86/aarch64 CPU has supported both bf16 and fp16 natively.
         return [torch.bfloat16, torch.float16, torch.float32]
+    
+    @property
+    def pass_key(self) -> str:
+        return "post_grad_custom_post_pass"
 
     @classmethod
     def get_device_name(cls, device_id: int = 0) -> str:
@@ -271,6 +275,11 @@ class CpuPlatform(Platform):
             vllm_config.scheduler_config.max_num_batched_tokens = max(
                 vllm_config.scheduler_config.max_model_len,
                 DEFAULT_MAX_NUM_BATCHED_TOKENS)
+            
+    @classmethod
+    def get_pass_manager_cls(cls) -> str:
+        """Get the pass manager class of a device."""
+        return "vllm.compilation.pass_manager.PostGradPassManager"
 
     @classmethod
     def get_allowed_cpu_core_node_list(
