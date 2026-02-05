@@ -203,6 +203,7 @@ class IrOp:
         return _register_impl
 
     def _inner_call(self, *args, **kwargs) -> Any:
+<<<<<<< HEAD
         """
         Eager call to torch op lands here. When torch wrapping is disabled,
         __call__ routes straight here instead of going through torch op dispatching.
@@ -222,10 +223,17 @@ class IrOp:
         bound_args.apply_defaults()
         return bound_args.args
 
+=======
+        """Direct call to torch op, could also skip the torch layer if eager?"""
+        impl = self.dispatch(*args, **kwargs)
+        return impl.impl_fn(*args, **kwargs)
+
+>>>>>>> 6ff798be5 (Extract dispatch, test warnings)
     def dispatch(self, *args, **kwargs) -> "IrOpImpl":
         """
         Dispatch to the appropriate implementation based on current priority
         and argument support checks. Returns the selected IrOpImpl.
+<<<<<<< HEAD
 
         THIS FUNCTION IS ON THE HOT PATH (OP DISPATCH), MUST BE FAST.
         """
@@ -257,6 +265,21 @@ class IrOp:
                     lazy(lambda: tensors_str_no_data(args)),
                     lazy(lambda: tensors_str_no_data(kwargs)),
                 )
+=======
+        """
+        if not self._priority_impls:
+            logger.warning_once(
+                "Priority not set for op %s, using native implementation.", self.name
+            )
+            return self.impls["native"]
+
+        for impl in self._priority_impls:
+            assert impl.supported, (
+                "All implementations in priority list must be supported."
+            )
+            if impl.supports_args is None or impl.supports_args(*args, **kwargs):
+                return impl
+>>>>>>> 6ff798be5 (Extract dispatch, test warnings)
 
         raise RuntimeError(
             "Priority set incorrectly: the last implementation must "
