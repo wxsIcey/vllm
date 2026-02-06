@@ -281,6 +281,15 @@ class IrOp:
                 return impl
 >>>>>>> 6ff798be5 (Extract dispatch, test warnings)
 
+            logger.debug(
+                "Skipping provider %s because it does not support "
+                "%s with args=%s kwargs=%s",
+                impl.provider,
+                self.name,
+                args,
+                kwargs,
+            )
+
         raise RuntimeError(
             "Priority set incorrectly: the last implementation must "
             "support all args (can be native). This is likely an internal bug"
