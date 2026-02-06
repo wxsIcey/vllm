@@ -286,8 +286,8 @@ class IrOp:
                 "%s with args=%s kwargs=%s",
                 impl.provider,
                 self.name,
-                args,
-                kwargs,
+                lazy(lambda: tensors_str_no_data(args)),
+                lazy(lambda: tensors_str_no_data(kwargs)),
             )
 
         raise RuntimeError(
