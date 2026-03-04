@@ -107,6 +107,15 @@ class CudaPlatformBase(Platform):
         "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES",
     ]
 
+    @classmethod
+    def import_kernels(cls) -> None:
+        import contextlib
+
+        super().import_kernels()
+        # Import CUDA kernel registrations.
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.vllm_c  # noqa: F401
+
     @property
     def supported_dtypes(self) -> list[torch.dtype]:
         if self.has_device_capability(80):
@@ -505,7 +514,10 @@ class CudaPlatformBase(Platform):
             return IrOpPriorityConfig.with_default(["native"])
 
         # Use vllm_c kernels where available when no codegen
-        return IrOpPriorityConfig.with_default(["vllm_c", "native"])
+        return IrOpPriorityConfig.with_default(
+            ["vllm_c", "native"],
+            rms_norm_gated=["triton", "native"],
+        )
 
 
 # NVML utils

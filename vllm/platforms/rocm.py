@@ -261,6 +261,12 @@ class RocmPlatform(Platform):
         with contextlib.suppress(ImportError):
             import vllm._rocm_C  # noqa: F401
 
+        # Import CUDA-alike and ROCm-specific kernel registrations.
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.vllm_c  # noqa: F401
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.aiter_ops  # noqa: F401
+
     @classmethod
     def get_attn_backend_cls(
         cls,
@@ -683,4 +689,7 @@ class RocmPlatform(Platform):
         from vllm.config.kernel import IrOpPriorityConfig
 
         # On ROCm, we use custom ops by default even when compiling
-        return IrOpPriorityConfig.with_default(["aiter", "vllm_c", "native"])
+        return IrOpPriorityConfig.with_default(
+            ["aiter", "vllm_c", "native"],
+            rms_norm_gated=["triton", "native"],
+        )

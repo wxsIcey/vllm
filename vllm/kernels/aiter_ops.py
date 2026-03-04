@@ -7,10 +7,7 @@ from torch import Tensor
 from torch.library import Library
 
 from vllm import ir
-from vllm.platforms import current_platform
 from vllm.utils.torch_utils import direct_register_custom_op
-
-current_platform.import_kernels()
 
 
 def is_aiter_found() -> bool:

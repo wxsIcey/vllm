@@ -219,7 +219,12 @@ class Platform:
 
     @classmethod
     def import_kernels(cls) -> None:
-        """Import any platform-specific C kernels."""
+        """Import any platform-specific C kernels.
+
+        Subclasses should override this method to also import their IR op
+        kernel registration modules (the files that call
+        ``ir.ops.<op>.register_impl(...)``).
+        """
         try:
             import vllm._C  # noqa: F401
         except ImportError as e:
