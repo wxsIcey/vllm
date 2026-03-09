@@ -867,4 +867,6 @@ class RocmPlatform(Platform):
         from vllm.config.kernel import IrOpPriorityConfig
 
         # On ROCm, we use custom ops by default even when compiling
-        return IrOpPriorityConfig.with_default(["aiter", "vllm_c", "native"])
+        return IrOpPriorityConfig.with_default(
+            ["aiter", "vllm_c", "native"], rms_norm_gated=["triton", "native"]
+        )
