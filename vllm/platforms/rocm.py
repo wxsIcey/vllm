@@ -396,6 +396,8 @@ class RocmPlatform(Platform):
         with contextlib.suppress(ImportError):
             import vllm._moe_C  # noqa: F401
         with contextlib.suppress(ImportError):
+            import vllm._rocm_C  # noqa: F401
+        with contextlib.suppress(ImportError):
             import vllm.kernels.vllm_c  # noqa: F401  # CUDA-alike kernels
         with contextlib.suppress(ImportError):
             import vllm.kernels.aiter_ops  # noqa: F401  # ROCm-specific
