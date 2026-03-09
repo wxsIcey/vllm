@@ -6,8 +6,6 @@ from torch import Tensor
 from vllm import ir
 from vllm.platforms import current_platform
 
-current_platform.import_kernels()
-
 CUDA_ALIKE = current_platform.is_cuda_alike()
 """Most kernels in this file are supported on all CUDA-alike platforms."""
 

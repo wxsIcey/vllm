@@ -583,6 +583,18 @@ class CudaPlatformBase(Platform):
         return True
 
     @classmethod
+    def import_kernels(cls) -> None:
+        import contextlib
+
+        super().import_kernels()
+        # Import CUDA kernel registrations.
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.vllm_c  # noqa: F401
+        # oink: SM100 (Blackwell)
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.oink_ops  # noqa: F401
+
+    @classmethod
     def get_default_ir_op_priority(
         cls, vllm_config: "VllmConfig"
     ) -> "IrOpPriorityConfig":

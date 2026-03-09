@@ -396,6 +396,12 @@ class RocmPlatform(Platform):
         with contextlib.suppress(ImportError):
             import vllm._rocm_C  # noqa: F401
 
+        # Import CUDA-alike and ROCm-specific kernel registrations.
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.vllm_c  # noqa: F401
+        with contextlib.suppress(ImportError):
+            import vllm.kernels.aiter_ops  # noqa: F401
+
     @classmethod
     def get_valid_backends(
         cls,
