@@ -387,20 +387,18 @@ class RocmPlatform(Platform):
 
     @classmethod
     def import_kernels(cls) -> None:
-        """Import ROCm-specific kernels."""
-        super().import_kernels()
-
         import contextlib
 
-        # Import ROCm-specific extension
+        try:
+            import vllm._C  # noqa: F401
+        except ImportError as e:
+            logger.warning("Failed to import from vllm._C: %r", e)
         with contextlib.suppress(ImportError):
-            import vllm._rocm_C  # noqa: F401
-
-        # Import CUDA-alike and ROCm-specific kernel registrations.
+            import vllm._moe_C  # noqa: F401
         with contextlib.suppress(ImportError):
-            import vllm.kernels.vllm_c  # noqa: F401
+            import vllm.kernels.vllm_c  # noqa: F401  # CUDA-alike kernels
         with contextlib.suppress(ImportError):
-            import vllm.kernels.aiter_ops  # noqa: F401
+            import vllm.kernels.aiter_ops  # noqa: F401  # ROCm-specific
 
     @classmethod
     def get_valid_backends(

@@ -586,11 +586,15 @@ class CudaPlatformBase(Platform):
     def import_kernels(cls) -> None:
         import contextlib
 
-        super().import_kernels()
-        # Import CUDA kernel registrations.
+        try:
+            import vllm._C  # noqa: F401
+        except ImportError as e:
+            logger.warning("Failed to import from vllm._C: %r", e)
+        with contextlib.suppress(ImportError):
+            import vllm._moe_C  # noqa: F401
         with contextlib.suppress(ImportError):
             import vllm.kernels.vllm_c  # noqa: F401
-        # oink: SM100 (Blackwell)
+        # oink: SM100
         with contextlib.suppress(ImportError):
             import vllm.kernels.oink_ops  # noqa: F401
 
