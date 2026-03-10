@@ -28,3 +28,33 @@ def rms_norm(
     output = torch.empty(x.shape, device=x.device, dtype=x.dtype)
     torch.ops._C.rms_norm(output, x, weight, epsilon)
     return output
+
+
+mixer2_rms_norm_gated_has_weight = (
+    lambda x, gate, weight, epsilon, group_size=None: weight is not None
+)
+"""Triton gated RMSNorm kernel requires a weight tensor."""
+
+
+@ir.ops.mixer2_rms_norm_gated.register_impl(
+    "triton", supports_args=mixer2_rms_norm_gated_has_weight, supported=CUDA_ALIKE
+)
+def mixer2_rms_norm_gated(
+    x: Tensor,
+    gate: Tensor,
+    weight: Tensor | None,
+    epsilon: float,
+    group_size: int | None = None,
+) -> Tensor:
+    from vllm.model_executor.layers.mamba.ops.layernorm_gated import rms_norm_gated
+
+    assert weight is not None
+    return rms_norm_gated(
+        x,
+        weight,
+        bias=None,
+        z=gate,
+        eps=epsilon,
+        group_size=group_size,
+        norm_before_gate=False,
+    )
