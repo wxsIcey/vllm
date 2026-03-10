@@ -564,16 +564,7 @@ class RMSNormGated(CustomOp):
     def forward_cuda(
         self, x: torch.Tensor, z: torch.Tensor | None = None
     ) -> torch.Tensor:
-        return ir.ops.rms_norm_gated(
-            x,
-            self.weight,
-            self.bias,
-            z,
-            self.eps,
-            self.group_size,
-            self.norm_before_gate,
-            self.activation,
-        )
+        return self.forward_native(x, z)
 
 
 class LayerNorm(nn.Module):

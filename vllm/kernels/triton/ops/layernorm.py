@@ -1,8 +1,9 @@
 import torch
 from torch import Tensor
+
+from vllm import ir
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import direct_register_custom_op
-from vllm import ir
 
 CUDA_ALIKE = current_platform.is_cuda_alike()
 
