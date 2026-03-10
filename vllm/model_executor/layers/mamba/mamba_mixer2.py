@@ -144,22 +144,7 @@ class Mixer2RMSNormGated(CustomOp):
         x: torch.Tensor,
         gate: torch.Tensor,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        input_dtype = x.dtype
-        if not self.use_rms_norm:
-            # Keep gate in float32 for numerical stability during silu
-            return x * nn.functional.silu(gate.to(torch.float32)).to(input_dtype)
-
-        # Cases requiring collective ops: fall back to forward_native
-        if self.n_groups == 1 and self.tp_size > 1:
-            return self.forward_native(x, gate)
-        if self.n_groups % self.tp_size != 0:
-            return self.forward_native(x, gate)
-
-        # n_groups == 1 (tp_size==1) or n_groups % tp_size == 0 (local grouped norm)
-        group_size = None if self.n_groups == 1 else self.group_size
-        return vllm.ir.ops.mixer2_rms_norm_gated(
-            x, gate, self.weight, self.variance_epsilon, group_size
-        )
+        return self.forward_native(x, gate)
 
 
 def mamba_v2_sharded_weight_loader(

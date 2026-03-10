@@ -5,7 +5,6 @@ from torch import Tensor
 
 from vllm import ir
 from vllm.platforms import current_platform
-from vllm.utils.torch_utils import direct_register_custom_op
 
 current_platform.import_kernels()
 
@@ -29,62 +28,3 @@ def rms_norm(
     output = torch.empty(x.shape, device=x.device, dtype=x.dtype)
     torch.ops._C.rms_norm(output, x, weight, epsilon)
     return output
-
-
-mixer2_rms_norm_gated_has_weight = (
-    lambda x, gate, weight, epsilon, group_size=None: weight is not None
-)
-"""Triton gated RMSNorm kernel requires a weight tensor."""
-
-
-def _triton_mixer2_rms_norm_gated_impl(
-    x: Tensor,
-    gate: Tensor,
-    weight: Tensor,
-    epsilon: float,
-    group_size: int | None = None,
-) -> Tensor:
-    from vllm.model_executor.layers.mamba.ops.layernorm_gated import rms_norm_gated
-
-    return rms_norm_gated(
-        x,
-        weight,
-        bias=None,
-        z=gate,
-        eps=epsilon,
-        group_size=group_size,
-        norm_before_gate=False,
-    )
-
-
-def _triton_mixer2_rms_norm_gated_fake(
-    x: Tensor,
-    gate: Tensor,
-    weight: Tensor,
-    epsilon: float,
-    group_size: int | None = None,
-) -> Tensor:
-    return torch.empty_like(x)
-
-
-direct_register_custom_op(
-    op_name="triton_mixer2_rms_norm_gated",
-    op_func=_triton_mixer2_rms_norm_gated_impl,
-    mutates_args=[],
-    fake_impl=_triton_mixer2_rms_norm_gated_fake,
-)
-
-
-@ir.ops.mixer2_rms_norm_gated.register_impl(
-    "triton", supports_args=mixer2_rms_norm_gated_has_weight, supported=CUDA_ALIKE
-)
-def mixer2_rms_norm_gated(
-    x: Tensor,
-    gate: Tensor,
-    weight: Tensor | None,
-    epsilon: float,
-    group_size: int | None = None,
-) -> Tensor:
-    assert weight is not None
-    return torch.ops.vllm.triton_mixer2_rms_norm_gated(x, gate, weight, epsilon,
-                                                        group_size)
