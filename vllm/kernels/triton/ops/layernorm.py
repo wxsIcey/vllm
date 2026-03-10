@@ -1,17 +1,18 @@
 from torch import Tensor
+
 from vllm import ir
 
-@ir.ops.rms_norm_gated.register_impl("triton", supported=True)
 
+@ir.ops.rms_norm_gated.register_impl("triton", supported=True)
 def rms_norm_gated(
     x: Tensor,
     weight: Tensor,
     bias: Tensor,
-    z: Tensor = None,
-    epsilon: float = 1e-6,
+    z: Tensor | None,
+    epsilon: float,
     group_size: int | None = None,
-    norm_before_gate: bool = True,
-    activation: str = "swish"
+    norm_before_gate: bool = False,
+    activation: str = "",
 ) -> Tensor:
     from vllm.model_executor.layers.fla.ops.layernorm_guard import layer_norm_fwd
 
@@ -25,10 +26,10 @@ def rms_norm_gated(
         if z.stride(-1) != 1:
             z = z.contiguous()
     weight = weight.contiguous()
-    
+
     if bias is not None:
         bias = bias.contiguous()
-        
+
     y, _, _ = layer_norm_fwd(
         x,
         weight,
@@ -37,7 +38,7 @@ def rms_norm_gated(
         z=z,
         group_size=group_size,
         norm_before_gate=norm_before_gate,
-        is_rms_norm=False,
+        is_rms_norm=True,
         activation=activation,
     )
     return y.reshape(x_shape_og)

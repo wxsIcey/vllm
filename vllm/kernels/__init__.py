@@ -4,4 +4,4 @@
 
 from . import aiter_ops, oink_ops, triton, vllm_c
 
-__all__ = ["vllm_c", "aiter_ops", "oink_ops", "trion"]
+__all__ = ["vllm_c", "aiter_ops", "oink_ops", "triton"]
