@@ -118,6 +118,7 @@ class IrOp:
     registry: ClassVar[dict[str, "IrOp"]] = {}
 
     name: str
+    has_reduction: bool
     impls: dict[str, "IrOpImpl"]
     allow_inplace: bool = False
 
@@ -146,6 +147,7 @@ class IrOp:
             ]
 
         self.name = name
+        self.has_reduction = has_reduction
         self.impls: dict[str, IrOpImpl] = {}
         self.activations = activations
         self.activation_indices = [
@@ -239,10 +241,20 @@ class IrOp:
         def my_provider_impl(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor: ...
         ```
 
+        Default behavior of batch_invariant depends on op.has_reduction:
+        - op.has_reduction == True: batch_invariant = False
+        - op.has_reduction == False: batch_invariant = True
+
+        This is because ops without reductions are always batch-invariant.
+        Ops with reductions have to opt-in, as they are not batch-invariant by default.
+
         """
         assert provider not in RESERVED_PROVIDERS, (
             f"Provider name {provider} is reserved."
         )
+
+        if batch_invariant is None:
+            batch_invariant = not self.has_reduction
 
         def _register_impl(f: Callable):
             impl = IrOpImpl(self, provider, f, supported, supports_args, inplace)
@@ -334,12 +346,13 @@ class IrOp:
         return [p.provider for p in self._priority_impls]
 
     @contextlib.contextmanager
-    def set_priority(self, priority: list[str]):
+    def set_priority(self, priority: list[str], *, batch_invariant_only: bool = False):
         """
         Context manager to set the dispatch priority for implementations for this op.
         """
         assert all(p in self.impls for p in priority), (
-            "All providers in priority must be registered implementations."
+            f"All providers in priority must be registered implementations, missing "
+            f"{','.join(p for p in priority if p not in self.impls)}"
         )
 
         def filter_priority_impls(p_list: list[str]) -> list[IrOpImpl]:
@@ -348,6 +361,10 @@ class IrOp:
                 impl = self.impls[p]
                 if not impl.supported:
                     # Skip unsupported implementations
+                    continue
+
+                if batch_invariant_only and not impl.batch_invariant:
+                    # Skip batch invariant implementations
                     continue
 
                 filtered_impls.append(impl)
@@ -475,6 +492,12 @@ class IrOpInplaceOverload:
 
 
 class IrOpImpl:
+    op: IrOp
+    provider: str
+    impl_fn: Callable
+    supported: bool
+    batch_invariant: bool
+
     def __init__(
         self,
         op: IrOp,
