@@ -7,6 +7,7 @@ from torch import Tensor
 from torch.library import Library
 
 from vllm import ir
+from vllm._aiter_ops import rocm_aiter_ops
 from vllm.platforms import current_platform
 from vllm.utils.torch_utils import direct_register_custom_op
 
@@ -33,6 +34,9 @@ direct_register_aiter_op = functools.partial(
 
 AITER_SUPPORTED = is_aiter_found()
 """Most kernels in this file are supported if AITER is installed."""
+
+AITER_ROTARY_SUPPORTED = rocm_aiter_ops.is_triton_rotary_embed_enabled()
+"""Rotary embedding via aiter triton kernel is supported."""
 
 rms_no_var_16bit_only = (
     lambda x, weight, epsilon, variance_size=None: variance_size is None
@@ -77,3 +81,18 @@ def _rms_norm_fake(x: Tensor, weight: Tensor, variance_epsilon: float) -> Tensor
 direct_register_aiter_op(
     op_name="rms_norm", op_func=_rms_norm_impl, fake_impl=_rms_norm_fake
 )
+
+
+@ir.ops.rotary_embedding.register_impl("aiter", supported=AITER_ROTARY_SUPPORTED)
+def rotary_embedding(
+    positions: Tensor,
+    query: Tensor,
+    key: Tensor,
+    head_size: int,
+    cos_sin_cache: Tensor,
+    is_neox_style: bool,
+) -> tuple[Tensor, Tensor]:
+    torch.ops.vllm.rocm_aiter_triton_rotary_embedding(
+        positions, query, key, head_size, cos_sin_cache, is_neox_style
+    )
+    return query, key

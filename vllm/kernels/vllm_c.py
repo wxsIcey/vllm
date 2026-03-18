@@ -15,6 +15,23 @@ rms_no_var_size = lambda x, weight, epsilon, variance_size=None: variance_size i
 """vLLM kernel does not support variance_size parameter."""
 
 
+@ir.ops.rotary_embedding.register_impl("vllm_c", supported=CUDA_ALIKE)
+def rotary_embedding(
+    positions: torch.Tensor,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    head_size: int,
+    cos_sin_cache: torch.Tensor,
+    is_neox_style: bool,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    query = query.clone()  # todo: change to maybe_inplace
+    key = key.clone()
+    torch.ops._C.rotary_embedding(
+        positions, query, key, head_size, cos_sin_cache, is_neox_style
+    )
+    return query, key
+
+
 @ir.ops.rms_norm.register_impl(
     "vllm_c", supports_args=rms_no_var_size, supported=CUDA_ALIKE
 )
