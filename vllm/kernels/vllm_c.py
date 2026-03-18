@@ -19,13 +19,13 @@ rms_no_var_size = lambda x, weight, epsilon, variance_size=None: variance_size i
 def rotary_embedding(
     positions: torch.Tensor,
     query: torch.Tensor,
-    key: torch.Tensor | None,
+    key: torch.Tensor,
     head_size: int,
     cos_sin_cache: torch.Tensor,
     is_neox_style: bool,
-) -> tuple[torch.Tensor, torch.Tensor | None]:
-    query = query.clone()  # 要换成maybe_inplace
-    key = key.clone() if key is not None else None
+) -> tuple[torch.Tensor, torch.Tensor]:
+    query = query.clone()  # todo: change to maybe_inplace
+    key = key.clone()
     torch.ops._C.rotary_embedding(
         positions, query, key, head_size, cos_sin_cache, is_neox_style
     )

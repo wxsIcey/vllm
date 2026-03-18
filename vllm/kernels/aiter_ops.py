@@ -87,11 +87,11 @@ direct_register_aiter_op(
 def rotary_embedding(
     positions: Tensor,
     query: Tensor,
-    key: Tensor | None,
+    key: Tensor,
     head_size: int,
     cos_sin_cache: Tensor,
     is_neox_style: bool,
-) -> tuple[Tensor, Tensor | None]:
+) -> tuple[Tensor, Tensor]:
     torch.ops.vllm.rocm_aiter_triton_rotary_embedding(
         positions, query, key, head_size, cos_sin_cache, is_neox_style
     )
