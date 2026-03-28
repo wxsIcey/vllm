@@ -12,6 +12,7 @@ from vllm.distributed import (
     get_pcp_group,
     tensor_model_parallel_all_reduce,
 )
+from vllm.model_executor.custom_op import PluggableLayer
 from vllm.forward_context import (
     ForwardContext,
     get_forward_context,
@@ -177,7 +178,7 @@ def _unpack(
         return (None, result)
 
 
-class MoERunner(MoERunnerInterface):
+class MoERunner(PluggableLayer, MoERunnerInterface):
     """
     Standard MoE runner implementation for executing Mixture of Experts layers.
 
