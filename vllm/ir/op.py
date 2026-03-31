@@ -136,6 +136,12 @@ class IrOp:
 
         self.name = name
         self.has_reduction = has_reduction
+        self.activations = activations
+        self.activation_indices = [
+            i
+            for i, p in enumerate(self._py_signature.parameters.values())
+            if p.name in activations
+        ]
         self.impls: dict[str, IrOpImpl] = {}
         self.activations = activations
         self.activation_indices = [
