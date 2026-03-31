@@ -27,6 +27,7 @@ R = TypeVar("R")
 
 
 class PassContext:
+    # TODO dataclass
     def __init__(self, compile_range: Range):
         self.compile_range: Range = compile_range
 
