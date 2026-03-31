@@ -10,7 +10,6 @@ from torch._inductor.pattern_matcher import (
     PatternMatcherPass,
     register_graph_pattern,
 )
-from torch._ops import OpOverload, OpOverloadPacket
 
 from vllm.config import VllmConfig
 from vllm.ir.op import IrOp
