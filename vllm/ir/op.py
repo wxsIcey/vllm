@@ -157,6 +157,7 @@ class IrOp:
         self._schema_str = infer_schema(native_impl, mutates_args=[])
         self._input_generator: InputGenerator | None = None
         self._tolerance_overrides: ToleranceSpec = {}
+        self.allow_inplace = allow_inplace
 
         # native implementation
         self.impls["native"] = IrOpImpl(
@@ -182,6 +183,11 @@ class IrOp:
         vllm_ir_lib._register_fake(self.name, self._fake_call)
         assert hasattr(torch.ops.vllm_ir, name)
         self.torch_op: torch._ops.OpOverload = getattr(torch.ops.vllm_ir, name).default
+
+        if self.allow_inplace:
+            self.maybe_inplace = IrOpInplaceOverload(self)
+        else:
+            self.maybe_inplace = None
 
     def register_fake(self, fn: Callable) -> Callable:
         """
