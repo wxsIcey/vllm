@@ -1,11 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
-import torch
 from torch import Tensor
 
 from vllm import ir
 from vllm.platforms import current_platform
-from vllm.utils.torch_utils import direct_register_custom_op
 
 CUDA_ALIKE = current_platform.is_cuda_alike()
 
@@ -50,27 +48,6 @@ def _rms_norm_gated_triton_impl(
     return y.reshape(x_shape_og)
 
 
-def _rms_norm_gated_triton_fake(
-    x: Tensor,
-    weight: Tensor,
-    bias: Tensor | None,
-    z: Tensor | None,
-    epsilon: float,
-    group_size: int | None,
-    norm_before_gate: bool,
-    activation: str,
-) -> Tensor:
-    return torch.empty_like(x)
-
-
-direct_register_custom_op(
-    op_name="rms_norm_gated_triton",
-    op_func=_rms_norm_gated_triton_impl,
-    mutates_args=[],
-    fake_impl=_rms_norm_gated_triton_fake,
-)
-
-
 @ir.ops.rms_norm_gated.register_impl("triton", supported=CUDA_ALIKE)
 def rms_norm_gated(
     x: Tensor,
@@ -82,6 +59,6 @@ def rms_norm_gated(
     norm_before_gate: bool = False,
     activation: str = "swish",
 ) -> Tensor:
-    return torch.ops.vllm.rms_norm_gated_triton(
+    return _rms_norm_gated_triton_impl(
         x, weight, bias, z, epsilon, group_size, norm_before_gate, activation
     )
