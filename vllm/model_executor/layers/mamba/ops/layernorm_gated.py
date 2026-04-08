@@ -4,12 +4,11 @@
 # Adapted from https://github.com/state-spaces/mamba/blob/60dadf2e0ee730ac337035d5533de10bc26e4847/mamba_ssm/ops/triton/layernorm_gated.py
 
 import torch
+from torch.library import wrap_triton
 
 from vllm.triton_utils import tl, triton
 
 
-@triton.heuristics({"HAS_BIAS": lambda args: args["B"] is not None})
-@triton.heuristics({"HAS_Z": lambda args: args["Z"] is not None})
 @triton.jit
 def _layer_norm_fwd_1pass_kernel(
     X,  # pointer to the input
@@ -120,7 +119,7 @@ def _layer_norm_fwd(
     num_warps = min(max(BLOCK_N // 256, 1), 8)
     grid = (M, ngroups)
     with torch.accelerator.device_index(x.device.index):
-        _layer_norm_fwd_1pass_kernel[grid](
+        wrap_triton(_layer_norm_fwd_1pass_kernel)[grid](
             x,
             out,
             weight,
@@ -135,6 +134,8 @@ def _layer_norm_fwd(
             group_size,
             eps,
             BLOCK_N=BLOCK_N,
+            HAS_BIAS=bias is not None,
+            HAS_Z=z is not None,
             NORM_BEFORE_GATE=norm_before_gate,
             IS_RMS_NORM=is_rms_norm,
             num_warps=num_warps,
