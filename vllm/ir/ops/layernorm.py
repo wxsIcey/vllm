@@ -44,4 +44,6 @@ def mixer2_rms_norm_gated(
         x_grouped = x_grouped * torch.rsqrt(variance + epsilon)
         x = x_grouped.view(*prefix_dims, hidden_dims)
 
-    return (weight * x).to(input_dtype)
+    if weight is not None:
+        x = x.to(weight.dtype) * weight
+    return x.to(input_dtype)
