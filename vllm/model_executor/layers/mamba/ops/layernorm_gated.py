@@ -4,11 +4,11 @@
 # Adapted from https://github.com/state-spaces/mamba/blob/60dadf2e0ee730ac337035d5533de10bc26e4847/mamba_ssm/ops/triton/layernorm_gated.py
 
 import torch
-from torch.library import wrap_triton
 
 from vllm.triton_utils import tl, triton
 
 
+@torch.library.wrap_triton
 @triton.jit
 def _layer_norm_fwd_1pass_kernel(
     X,  # pointer to the input
@@ -119,7 +119,7 @@ def _layer_norm_fwd(
     num_warps = min(max(BLOCK_N // 256, 1), 8)
     grid = (M, ngroups)
     with torch.accelerator.device_index(x.device.index):
-        wrap_triton(_layer_norm_fwd_1pass_kernel)[grid](
+        _layer_norm_fwd_1pass_kernel[grid](
             x,
             out,
             weight,
