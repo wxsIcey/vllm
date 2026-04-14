@@ -58,6 +58,10 @@ class FlashInferCuteDSLExperts(mk.FusedMoEExpertsModular):
         self.local_expert_offset = self.ep_rank * self.local_num_experts
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
+        from vllm.model_executor.layers.fused_moe.layer import FusedMoE
+
+        if not isinstance(layer, FusedMoE):
+            return
         layer.w13_weight_scale_2.data.mul_(layer.w13_input_scale)
         layer.w2_weight_scale_2.data.mul_(layer.w2_input_scale)
 
