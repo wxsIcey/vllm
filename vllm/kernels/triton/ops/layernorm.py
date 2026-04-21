@@ -9,6 +9,9 @@ from vllm.platforms import current_platform
 current_platform.import_kernels()
 
 CUDA_ALIKE = current_platform.is_cuda_alike()
+
+GPGPU_DEVICE = CUDA_ALIKE or current_platform.is_xpu()
+
 """Most kernels in this file are supported on all CUDA-alike platforms."""
 
 
@@ -19,7 +22,9 @@ mixer2_rms_norm_gated_has_weight = (
 
 
 @ir.ops.mixer2_rms_norm_gated.register_impl(
-    "triton", supports_args=mixer2_rms_norm_gated_has_weight, supported=CUDA_ALIKE
+    "triton",
+    supports_args=mixer2_rms_norm_gated_has_weight,
+    supported=GPGPU_DEVICE,
 )
 def mixer2_rms_norm_gated(
     x: Tensor,
