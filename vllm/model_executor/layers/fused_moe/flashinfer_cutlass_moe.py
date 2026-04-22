@@ -62,10 +62,6 @@ def is_valid_flashinfer_cutlass_fused_moe(
 
 class FlashInferExperts(mk.FusedMoEExpertsModular):
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        from vllm.model_executor.layers.fused_moe.layer import FusedMoE
-
-        if not isinstance(layer, FusedMoE):
-            return
         if self.quant_config.use_nvfp4_w4a4:
             layer.w13_weight_scale_2.data.mul_(layer.w13_input_scale)
             layer.w2_weight_scale_2.data.mul_(layer.w2_input_scale)

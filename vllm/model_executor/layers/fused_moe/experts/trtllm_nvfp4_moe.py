@@ -67,10 +67,6 @@ class TrtLlmNvFp4ExpertsBase:
             self.g1_scale_c = self.quant_config.a2_gscale.clone()
 
     def process_weights_after_loading(self, layer: torch.nn.Module) -> None:
-        from vllm.model_executor.layers.fused_moe.layer import FusedMoE
-
-        if not isinstance(layer, FusedMoE):
-            return
         layer.w13_weight_scale_2.data.mul_(layer.w13_input_scale)
         layer.w2_weight_scale_2.data.mul_(layer.w2_input_scale)
         # Recompute g1_scale_c since g1_alphas was just fused in-place.
