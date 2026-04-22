@@ -7,6 +7,8 @@ from vllm.platforms import current_platform
 
 CUDA_ALIKE = current_platform.is_cuda_alike()
 
+GPGPU_DEVICE = CUDA_ALIKE or current_platform.is_xpu()
+
 
 def _rms_norm_gated_triton_impl(
     x: Tensor,
@@ -48,7 +50,7 @@ def _rms_norm_gated_triton_impl(
     return y.reshape(x_shape_og)
 
 
-@ir.ops.rms_norm_gated.register_impl("triton", supported=CUDA_ALIKE)
+@ir.ops.rms_norm_gated.register_impl("triton", supported=GPGPU_DEVICE)
 def rms_norm_gated(
     x: Tensor,
     weight: Tensor,
