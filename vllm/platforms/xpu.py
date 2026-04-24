@@ -270,8 +270,9 @@ class XPUPlatform(Platform):
         cc = vllm_config.compilation_config
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["xpu_kernels", "native"]
+        rms_norm_gated = ["triton", "native"]
 
-        return IrOpPriorityConfig.with_default(default)
+        return IrOpPriorityConfig.with_default(default, rms_norm_gated=rms_norm_gated)
 
     @classmethod
     def device_count(cls) -> int:
