@@ -23,7 +23,10 @@ from vllm.distributed import (
 )
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention import Attention
-from vllm.model_executor.layers.fused_moe import SharedFusedMoE
+from vllm.model_executor.layers.fused_moe import (
+    FusedMoE,
+    fused_moe_make_expert_params_mapping,
+)
 from vllm.model_executor.layers.layernorm import (
     GemmaRMSNorm as Qwen3NextRMSNorm,
 )
@@ -56,6 +59,7 @@ from vllm.sequence import IntermediateTensors
 from vllm.transformers_utils.configs.qwen3_next import Qwen3NextConfig
 
 from .interfaces import (
+    EagleModelMixin,
     HasInnerState,
     IsHybrid,
     MixtureOfExperts,
@@ -139,19 +143,19 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                 quant_config=quant_config,
                 reduce_results=False,
                 expert_gate=self.shared_expert_gate,
+                is_sequence_parallel=self.is_sequence_parallel,
                 prefix=f"{prefix}.shared_expert",
             )
         else:
             self.shared_expert = None
 
-        self.experts = SharedFusedMoE(
+        self.experts = FusedMoE(
             shared_experts=self.shared_expert,
             gate=self.gate,
             num_experts=self.n_routed_experts,
             top_k=config.num_experts_per_tok,
             hidden_size=config.hidden_size,
             intermediate_size=config.moe_intermediate_size,
-            reduce_results=False,
             renormalize=getattr(config, "norm_topk_prob", True),
             quant_config=quant_config,
             prefix=f"{prefix}.experts",
@@ -181,18 +185,11 @@ class Qwen3NextSparseMoeBlock(nn.Module):
                 hidden_states=hidden_states, router_logits=router_logits
             )
 
-        if self.shared_expert is not None:
-            final_hidden_states = final_hidden_states[0] + final_hidden_states[1]
-
         if self.is_sequence_parallel:
             final_hidden_states = tensor_model_parallel_all_gather(
                 final_hidden_states, 0
             )
             final_hidden_states = final_hidden_states[:num_tokens]
-        elif self.tp_size > 1:
-            final_hidden_states = self.experts.maybe_all_reduce_tensor_model_parallel(  # noqa E501
-                final_hidden_states
-            )
 
         return final_hidden_states.view(orig_shape)
 
@@ -454,7 +451,7 @@ class Qwen3NextDecoderLayer(nn.Module):
 
 
 @support_torch_compile
-class Qwen3NextModel(nn.Module):
+class Qwen3NextModel(nn.Module, EagleModelMixin):
     def __init__(self, *, vllm_config: VllmConfig, prefix: str = ""):
         super().__init__()
 
@@ -492,8 +489,6 @@ class Qwen3NextModel(nn.Module):
         else:
             self.norm = PPMissingLayer()
 
-        self.aux_hidden_state_layers: tuple[int, ...] = ()
-
     def embed_input_ids(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
@@ -515,19 +510,18 @@ class Qwen3NextModel(nn.Module):
             hidden_states = intermediate_tensors["hidden_states"]
             residual = intermediate_tensors["residual"]
 
-        aux_hidden_states = []
+        aux_hidden_states = self._maybe_add_hidden_state([], 0, hidden_states, residual)
         for layer_idx, layer in enumerate(
             islice(self.layers, self.start_layer, self.end_layer),
             start=self.start_layer,
         ):
-            if layer_idx in self.aux_hidden_state_layers:
-                aux_hidden_states.append(
-                    hidden_states + residual if residual is not None else hidden_states
-                )
             hidden_states, residual = layer(
                 positions=positions,
                 hidden_states=hidden_states,
                 residual=residual,
+            )
+            self._maybe_add_hidden_state(
+                aux_hidden_states, layer_idx + 1, hidden_states, residual
             )
 
         if not get_pp_group().is_last_rank:
@@ -542,7 +536,7 @@ class Qwen3NextModel(nn.Module):
     def get_expert_mapping(self) -> list[tuple[str, str, int, str]]:
         # Params for weights, fp8 weight scales, fp8 activation scales
         # (param_name, weight_name, expert_id, shard_id)
-        return SharedFusedMoE.make_expert_params_mapping(
+        return fused_moe_make_expert_params_mapping(
             self,
             ckpt_gate_proj_name="gate_proj",
             ckpt_down_proj_name="down_proj",
