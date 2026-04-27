@@ -12,7 +12,6 @@ from vllm.distributed import (
     get_pcp_group,
     tensor_model_parallel_all_reduce,
 )
-from vllm.model_executor.custom_op import PluggableLayer
 from vllm.forward_context import (
     ForwardContext,
     get_forward_context,
@@ -178,7 +177,7 @@ def _unpack(
         return (None, result)
 
 
-class MoERunner(PluggableLayer, MoERunnerInterface):
+class MoERunner(MoERunnerInterface):
     """
     Standard MoE runner implementation for executing Mixture of Experts layers.
 
@@ -221,7 +220,7 @@ class MoERunner(PluggableLayer, MoERunnerInterface):
         self.routed_output_transform = routed_output_transform
         self.routed_scaling_factor = routed_scaling_factor
         self.gate = gate
-        self.quant_method = quant_method
+        self._quant_method = quant_method
         self.enable_dbo = enable_dbo
 
         self._shared_experts: SharedExperts | None = None
@@ -331,8 +330,8 @@ class MoERunner(PluggableLayer, MoERunnerInterface):
     @property
     def _fused_output_is_reduced(self) -> bool:
         return (
-            self.quant_method.moe_kernel is not None
-            and self.quant_method.moe_kernel.output_is_reduced()
+            self._quant_method.moe_kernel is not None
+            and self._quant_method.moe_kernel.output_is_reduced()
         )
 
     def _maybe_reduce_shared_expert_output(
@@ -408,7 +407,7 @@ class MoERunner(PluggableLayer, MoERunnerInterface):
         )
         transformed_hidden_dim = hidden_states.shape[-1]
         if (
-            not self.quant_method.skip_forward_padding
+            not self._quant_method.skip_forward_padding
             and self.moe_config.hidden_dim != transformed_hidden_dim
         ):
             hidden_states = F.pad(
@@ -452,8 +451,8 @@ class MoERunner(PluggableLayer, MoERunnerInterface):
             shared_experts_input, SharedExpertsOrder.NO_OVERLAP
         )
 
-        if self.quant_method.is_monolithic:
-            fused_out = self.quant_method.apply_monolithic(
+        if self._quant_method.is_monolithic:
+            fused_out = self._quant_method.apply_monolithic(
                 layer=layer,
                 x=hidden_states,
                 router_logits=router_logits,
@@ -468,7 +467,7 @@ class MoERunner(PluggableLayer, MoERunnerInterface):
 
             # Passing shared_experts_input in case SharedExpertsOrder is
             # MK_INTERNAL_OVERLAPPED.
-            fused_out = self.quant_method.apply(
+            fused_out = self._quant_method.apply(
                 layer=layer,
                 x=hidden_states,
                 topk_weights=topk_weights,
@@ -619,7 +618,7 @@ class MoERunner(PluggableLayer, MoERunnerInterface):
     @property
     def do_naive_dispatch_combine(self) -> bool:
         return (
-            self.moe_config.dp_size > 1 and not self.quant_method.supports_internal_mk
+            self.moe_config.dp_size > 1 and not self._quant_method.supports_internal_mk
         )
 
     def _maybe_dispatch(
