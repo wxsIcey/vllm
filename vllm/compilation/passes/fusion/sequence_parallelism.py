@@ -11,7 +11,7 @@ import torch.fx as fx
 from torch._inductor.pattern_matcher import PatternMatcherPass
 
 import vllm.ir.ops
-from vllm.config import VllmConfig
+from vllm.config import get_current_vllm_config
 from vllm.config.utils import Range
 from vllm.distributed import get_tp_group, tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import get_tensor_model_parallel_world_size
@@ -360,8 +360,9 @@ class SequenceParallelismPass(VllmPatternMatcherPass):
     """
 
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
 
         # Get min_token_num threshold
         # Read min_token_num from config (calculated during config init)
@@ -382,7 +383,7 @@ class SequenceParallelismPass(VllmPatternMatcherPass):
 
         # Used to clean up redundant views created temporarily
         # to circumvent residual shape change issues
-        self.noop_cleanup = NoOpEliminationPass(config)
+        self.noop_cleanup = NoOpEliminationPass()
         self.noop_cleanup.pass_name = f"{self.pass_name}.{self.noop_cleanup.pass_name}"
 
         self.patterns: PatternMatcherPass = PatternMatcherPass(

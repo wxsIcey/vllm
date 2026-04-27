@@ -45,8 +45,7 @@ from .partition_rules import (
     inductor_partition_rule_context,
     should_split,
 )
-from .passes.inductor_pass import InductorPass, pass_context
-from .passes.pass_manager import PostGradPassManager
+from .passes.inductor_pass import pass_context
 
 logger = init_logger(__name__)
 
@@ -848,11 +847,8 @@ class VllmBackend:
         # Mark compilation for encoder.
         self.is_encoder = is_encoder or model_is_encoder
 
-        # Passes to run on the graph post-grad.
-        self.pass_manager = resolve_obj_by_qualname(
-            current_platform.get_pass_manager_cls()
-        )()
-        self.pass_key = current_platform.pass_key
+        self.pass_manager_hook = current_platform.pass_key
+        self.pass_manager: Any | None = None
 
         self.vllm_config = vllm_config
         self.compilation_config = vllm_config.compilation_config
@@ -933,25 +929,22 @@ class VllmBackend:
         return standalone_compile_artifacts, sym_shape_indices_map, returns_tuple_map
 
     def configure_post_pass(self) -> None:
-        self.pass_manager.configure(self.vllm_config)
+        pass_manager_cls = resolve_obj_by_qualname(
+            current_platform.get_pass_manager_cls()
+        )
+        self.pass_manager = pass_manager_cls.from_config(
+            self.vllm_config, hook=self.pass_manager_hook
+        )
 
-        # Post-grad custom passes are run using the post_grad_custom_post_pass
-        # hook. If a pass for that hook exists, add it to the pass manager.
-        if self.pass_key in self.inductor_config:
-            if isinstance(self.inductor_config[self.pass_key], PostGradPassManager):
-                raise ValueError(
-                    "PostGradPassManager can not be kept in CompilationConfig."
-                )
-            else:
-                # Config should automatically wrap all inductor passes
-                assert isinstance(
-                    self.compilation_config.inductor_compile_config[self.pass_key],
-                    InductorPass,
-                )
-                self.pass_manager.add(
-                    self.compilation_config.inductor_compile_config[self.pass_key]
-                )
-        self.inductor_config[self.pass_key] = self.pass_manager
+        if self.pass_manager_hook in self.inductor_config:
+            raise ValueError(
+                "CompilationConfig.inductor_compile_config["
+                f"{self.pass_manager_hook!r}] is reserved for the platform "
+                "PassManager. Use CompilationConfig.pass_pipeline or override "
+                "get_pass_manager_cls() on the platform instead."
+            )
+
+        self.inductor_config[self.pass_manager_hook] = self.pass_manager
 
     def _log_compilation_config(self):
         """Log vLLM compilation config for TORCH_TRACE/tlparse."""
@@ -970,6 +963,7 @@ class VllmBackend:
             for f in dataclasses.fields(pass_cfg)
             if isinstance(getattr(pass_cfg, f.name), bool) and getattr(pass_cfg, f.name)
         ]
+        explicit_pass_pipeline = list_to_str(cc.pass_pipeline)
 
         trace_structured(
             "artifact",
@@ -993,6 +987,7 @@ class VllmBackend:
                     "use_inductor_graph_partition": cc.use_inductor_graph_partition,
                     "inductor_passes": list_to_str(list(cc.inductor_passes.keys())),
                     "enabled_passes": list_to_str(enabled_passes),
+                    "pass_pipeline": explicit_pass_pipeline,
                     "dynamic_shapes_type": str(cc.dynamic_shapes_config.type),
                     "dynamic_shapes_evaluate_guards": cc.dynamic_shapes_config.evaluate_guards,  # noqa: E501
                 }

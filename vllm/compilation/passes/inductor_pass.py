@@ -33,7 +33,11 @@ class PassContext:
 
 def get_pass_context() -> PassContext:
     """Get the current pass context."""
-    assert _pass_context is not None
+    if _pass_context is None:
+        raise RuntimeError(
+            "Pass context is not set. Pass execution and PassManager.uuid() "
+            "must run under pass_context(...)."
+        )
     return _pass_context
 
 

@@ -16,13 +16,14 @@ from torch import fx
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._inductor.pattern_matcher import PatternMatcherPass, PatternPrettyPrinter
 
-from vllm.config import VllmConfig
+from vllm.config import VllmConfig, get_current_vllm_config
 from vllm.logger import init_logger
 
 from .fx_utils import is_func
 from .inductor_pass import InductorPass, enable_fake_mode
 
 logger = init_logger(__name__)
+_DEFAULT_CONFIG = object()
 
 
 @dataclass
@@ -35,22 +36,47 @@ class VllmInductorPass(InductorPass):
     """
     An inductor pass with access to vLLM PassConfig.
     It provides timing, logging, and dumping utilities.
+
+    The construction path is 0-arg initialization, with config resolved from
+    the current pass-manager context. Passes that are truly config-free may
+    explicitly pass None.
     """
 
     dump_prefix: ClassVar[int | None] = None
     """Keep track of pass index for debug dump ordering."""
 
-    def __init__(self, config: VllmConfig):
+    def __init__(self, config: object = _DEFAULT_CONFIG):
+        if config is _DEFAULT_CONFIG:
+            vllm_config = get_current_vllm_config()
+        elif config is None:
+            self.compilation_config = InductorCompilationConfig()
+            self.pass_config = None
+            self.model_dtype = None
+            self.device = None
+            self.pass_name = self.__class__.__name__
+            return
+        else:
+            raise TypeError(
+                "VllmInductorPass no longer accepts an explicit VllmConfig. "
+                "Use 0-arg construction under set_current_vllm_config(...), "
+                "or pass None only for config-free passes."
+            )
+
+        assert isinstance(vllm_config, VllmConfig)
         # Get only the necessary CompilationConfig for the inductor pass, since
         # full `CompilationConfig` contains pointer to model which is unsafe.
         self.compilation_config = InductorCompilationConfig(
-            splitting_ops=config.compilation_config.splitting_ops,
-            use_inductor_graph_partition=config.compilation_config.use_inductor_graph_partition,
+            splitting_ops=vllm_config.compilation_config.splitting_ops,
+            use_inductor_graph_partition=(
+                vllm_config.compilation_config.use_inductor_graph_partition
+            ),
         )
-        self.pass_config = config.compilation_config.pass_config
-        self.model_dtype = config.model_config.dtype if config.model_config else None
+        self.pass_config = vllm_config.compilation_config.pass_config
+        self.model_dtype = (
+            vllm_config.model_config.dtype if vllm_config.model_config else None
+        )
         self.device: str | None = (
-            config.device_config.device if config.device_config else None
+            vllm_config.device_config.device if vllm_config.device_config else None
         )
         self.pass_name = self.__class__.__name__
 
@@ -269,8 +295,8 @@ class VllmFusionPatternMatcherPass(VllmPatternMatcherPass):
     Subclasses register patterns via self.register() in their own __init__.
     """
 
-    def __init__(self, config: VllmConfig, pass_name: str) -> None:
-        super().__init__(config)
+    def __init__(self, pass_name: str) -> None:
+        super().__init__()
         self.pass_name = pass_name
         self.pm_pass = PatternMatcherPass(pass_name=pass_name)
         self._pattern_replacements: list[VllmPatternReplacement] = []
@@ -306,8 +332,8 @@ class VllmFusionPatternMatcherPass(VllmPatternMatcherPass):
 
 
 class PrinterInductorPass(VllmInductorPass):
-    def __init__(self, name: str, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self, name: str) -> None:
+        super().__init__()
         self.name = name
 
     def __call__(self, graph: torch.fx.Graph) -> None:

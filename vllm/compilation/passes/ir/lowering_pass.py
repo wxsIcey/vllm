@@ -12,7 +12,6 @@ from torch._inductor.pattern_matcher import (
 )
 from torch._ops import OpOverload, OpOverloadPacket
 
-from vllm.config import VllmConfig
 from vllm.ir.op import IrOp
 from vllm.logger import init_logger
 from vllm.logging_utils import lazy
@@ -58,8 +57,8 @@ class VllmIRLoweringPass(VllmInductorPass):
     This pass lowers vLLM IR ops to their implementations the priority list.
     """
 
-    def __init__(self, vllm_config: VllmConfig) -> None:
-        super().__init__(vllm_config)
+    def __init__(self) -> None:
+        super().__init__(None)
         self.patterns = PatternMatcherPass(self.pass_name)
         self.selected_impls: dict[str, dict[str, str]] = defaultdict(lambda: {})
         self.ops = [ir_op.torch_op for ir_op in IrOp.registry.values()]

@@ -7,7 +7,7 @@ import torch.fx as fx
 from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch.distributed._symmetric_memory import enable_symm_mem_for_group
 
-from vllm.config import VllmConfig
+from vllm.config import get_current_vllm_config
 from vllm.config.utils import Range
 from vllm.distributed import get_tp_group
 from vllm.distributed.parallel_state import (
@@ -373,8 +373,9 @@ class AllGatherCutlassScaledMMPattern(BasePattern):
 
 class AsyncTPPass(VllmPatternMatcherPass):
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
 
         # Enable symmetric memory for the TP process group
         enable_symm_mem_for_group(get_tp_group().device_group.group_name)

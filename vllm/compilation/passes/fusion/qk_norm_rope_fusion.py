@@ -11,7 +11,10 @@ from torch._higher_order_ops.auto_functionalize import auto_functionalized
 from torch._inductor.pattern_matcher import PatternMatcherPass
 
 import vllm.ir.ops
-from vllm.config import VllmConfig, get_layers_from_vllm_config
+from vllm.config import (
+    get_current_vllm_config,
+    get_layers_from_vllm_config,
+)
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.rotary_embedding import RotaryEmbedding
@@ -189,8 +192,9 @@ class QKNormRoPEFusionPass(VllmPatternMatcherPass):
     """Fuse Q/K RMSNorm + RoPE into fused_qk_norm_rope when the custom op exists."""
 
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
         self.patterns: PatternMatcherPass = PatternMatcherPass(
             pass_name="qk_norm_rope_fusion_pass"
         )

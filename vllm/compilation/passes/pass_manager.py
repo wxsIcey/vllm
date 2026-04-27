@@ -2,18 +2,19 @@
 # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
 import functools
 from collections.abc import Callable
-from typing import Any, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 from torch import fx as fx
 
 from vllm import envs
 from vllm._aiter_ops import rocm_aiter_ops
 from vllm.compilation.passes.utility.post_cleanup import PostCleanupPass
-from vllm.config import VllmConfig, set_current_vllm_config
+from vllm.config import VllmConfig
 from vllm.logger import init_logger
 from vllm.platforms import current_platform
 from vllm.utils.system_utils import set_env_var
 
+from .base import PassManager, PassSpec
 from .ir.lowering_pass import VllmIRLoweringPass
 from .vllm_inductor_pass import VllmInductorPass, VllmPatternMatcherPass
 
@@ -41,11 +42,7 @@ if current_platform.is_cuda():
     from .fusion.collective_fusion import AsyncTPPass
     from .fusion.minimax_qk_norm_fusion import MiniMaxQKNormPass
 
-from .inductor_pass import (
-    CustomGraphPass,
-    InductorPass,
-    get_pass_context,
-)
+from .inductor_pass import InductorPass, get_pass_context
 from .utility.fix_functionalization import FixFunctionalizationPass
 from .utility.noop_elimination import NoOpEliminationPass
 
@@ -73,132 +70,88 @@ def with_pattern_match_debug(fn: Callable[P, R]) -> Callable[P, R]:
     return wrapper
 
 
-class PostGradPassManager(CustomGraphPass):  # type: ignore[misc]
-    """
-    The pass manager for post-grad passes.
-    It handles configuration, adding custom passes, and running passes.
-    It supports uuid for the Inductor code cache. That includes torch<2.6
-    support using pickling (in .inductor_pass.CustomGraphPass).
+class PostGradPassManager(PassManager):  # type: ignore[misc]
+    """The default vLLM pass manager for post-grad passes."""
 
-    The order of the post-grad post-passes is:
-    1. passes (constructor parameter)
-    2. default passes (NoopEliminationPass, FusionPass)
-    3. config["post_grad_custom_post_pass"] (if it exists)
-    4. fix_functionalization
-    This way, all passes operate on a functionalized graph.
-    """
+    @classmethod
+    def compute_config_hash(
+        cls, config: VllmConfig, pass_pipeline: list[PassSpec] | None
+    ) -> str:
+        # PassConfig can affect pass behavior even when the pass list is
+        # explicitly provided, so include it until passes fully self-report
+        # their config dependencies in uuid().
+        return config.compilation_config.pass_config.compute_hash()
 
-    def __init__(self) -> None:
-        self.passes: list[InductorPass] = []
+    @classmethod
+    def default_pass_pipeline(cls, config: VllmConfig) -> list[InductorPass]:
+        pass_config = config.compilation_config.pass_config
+        pass_pipeline: list[PassSpec] = []
+
+        if pass_config.eliminate_noops:
+            pass_pipeline.append(NoOpEliminationPass)
+
+        if pass_config.enable_sp and current_platform.is_cuda_alike():
+            pass_pipeline.append(SequenceParallelismPass)
+            if pass_config.fuse_gemm_comms and current_platform.is_cuda():
+                pass_pipeline.append(AsyncTPPass)
+
+        if pass_config.fuse_allreduce_rms and current_platform.is_cuda():
+            pass_pipeline.append(AllReduceFusionPass)
+
+        if pass_config.fuse_minimax_qk_norm and current_platform.is_cuda():
+            pass_pipeline.append(MiniMaxQKNormPass)
+
+        if pass_config.fuse_norm_quant and current_platform.is_cuda_alike():
+            pass_pipeline.append(RMSNormQuantFusionPass)
+            if rocm_aiter_ops.is_enabled():
+                pass_pipeline.append(RocmAiterRMSNormQuantFusionPass)
+
+        if pass_config.fuse_act_quant and current_platform.is_cuda_alike():
+            pass_pipeline.append(ActivationQuantFusionPass)
+            if rocm_aiter_ops.is_enabled():
+                pass_pipeline.append(RocmAiterSiluMulFp8GroupQuantFusionPass)
+
+        if pass_config.fuse_act_padding and rocm_aiter_ops.is_enabled():
+            pass_pipeline.append(RocmAiterTritonAddRMSNormPadFusionPass)
+
+        if pass_config.fuse_mla_dual_rms_norm and rocm_aiter_ops.is_enabled():
+            pass_pipeline.append(MLADualRMSNormFusionPass)
+
+        if pass_config.fuse_rope_kvcache and current_platform.is_cuda_alike():
+            pass_pipeline.append(SplitCoalescingPass)
+            pass_pipeline.append(ScatterSplitReplacementPass)
+            pass_pipeline.append(RopeKVCacheFusionPass)
+
+        if pass_config.fuse_attn_quant and current_platform.is_cuda_alike():
+            pass_pipeline.append(AttnQuantFusionPass)
+            pass_pipeline.append(MLAAttnQuantFusionPass)
+
+        if pass_config.enable_qk_norm_rope_fusion and current_platform.is_cuda_alike():
+            pass_pipeline.append(SplitCoalescingPass)
+            pass_pipeline.append(QKNormRoPEFusionPass)
+
+        pass_pipeline.append(PostCleanupPass)
+        pass_pipeline.append(VllmIRLoweringPass)
+        pass_pipeline.append(PostCleanupPass)
+        pass_pipeline.append(FixFunctionalizationPass)
+        return pass_pipeline
 
     @with_pattern_match_debug
     def __call__(self, graph: fx.Graph) -> None:
-        VllmInductorPass.dump_prefix = 0  # reset dump index
-
+        VllmInductorPass.dump_prefix = 0
         compile_range = get_pass_context().compile_range
-        for pass_ in self.passes:
-            if pass_.is_applicable_for_range(compile_range):
-                pass_(graph)
-                VllmInductorPass.dump_prefix += 1
-            else:
-                logger.debug("Skipping %s with compile range %s", pass_, compile_range)
-
-        # perform the first post-cleanup before IR lowering to clean up fusion artifacts
-        # and make sure no dead IR ops are lowered.
-        self.post_cleanup(graph)
-        VllmInductorPass.dump_prefix += 1
-
-        # lowering before cleanup so DCE can clean up lowered ops.
-        # DCE handles mutating ops correctly as well.
-        self.ir_lowering(graph)
-        VllmInductorPass.dump_prefix += 1
-
-        # clean up after lowering again
-        self.post_cleanup(graph)
-        VllmInductorPass.dump_prefix += 1
-
-        # always run fix_functionalization last
-        self.fix_functionalization(graph)
-        VllmInductorPass.dump_prefix = None  # Cleanup index
-
-        VllmPatternMatcherPass.log_match_summary()
-
-    def configure(self, config: VllmConfig) -> None:
-        self.pass_config = config.compilation_config.pass_config
-
-        # Set the current vllm config to allow tracing CustomOp instances
-        with set_current_vllm_config(config, check_compile=False):
-            if self.pass_config.eliminate_noops:
-                self.passes += [NoOpEliminationPass(config)]
-
-            if self.pass_config.enable_sp:
-                self.passes += [SequenceParallelismPass(config)]
-                if self.pass_config.fuse_gemm_comms:
-                    self.passes += [AsyncTPPass(config)]
-
-            if self.pass_config.fuse_allreduce_rms:
-                self.passes += [AllReduceFusionPass(config)]
-
-            if self.pass_config.fuse_minimax_qk_norm:
-                self.passes += [MiniMaxQKNormPass(config)]
-
-            if self.pass_config.fuse_norm_quant:
-                self.passes += [RMSNormQuantFusionPass(config)]
-                if rocm_aiter_ops.is_enabled():
-                    self.passes += [
-                        RocmAiterRMSNormQuantFusionPass(config),
-                    ]
-            if self.pass_config.fuse_act_quant:
-                self.passes += [ActivationQuantFusionPass(config)]
-                if rocm_aiter_ops.is_enabled():
-                    self.passes += [RocmAiterSiluMulFp8GroupQuantFusionPass(config)]
-
-            if self.pass_config.fuse_act_padding and rocm_aiter_ops.is_enabled():
-                self.passes += [RocmAiterTritonAddRMSNormPadFusionPass(config)]
-
-            if self.pass_config.fuse_mla_dual_rms_norm and rocm_aiter_ops.is_enabled():
-                self.passes += [MLADualRMSNormFusionPass(config)]
-
-            if self.pass_config.fuse_rope_kvcache:
-                self.passes += [SplitCoalescingPass(config)]
-                self.passes += [ScatterSplitReplacementPass(config)]
-                self.passes += [RopeKVCacheFusionPass(config)]
-
-            if self.pass_config.fuse_attn_quant:
-                self.passes += [AttnQuantFusionPass(config)]
-                self.passes += [MLAAttnQuantFusionPass(config)]
-
-            if self.pass_config.enable_qk_norm_rope_fusion:
-                self.passes += [SplitCoalescingPass(config)]
-                self.passes += [QKNormRoPEFusionPass(config)]
-
-            self.ir_lowering = VllmIRLoweringPass(config)
-            self.post_cleanup = PostCleanupPass(config)
-            self.fix_functionalization = FixFunctionalizationPass(config)
-
-    def add(self, pass_: InductorPass) -> None:
-        assert isinstance(pass_, InductorPass)
-        self.passes.append(pass_)
-
-    def uuid(self) -> str:
-        """
-        The PostGradPassManager is set as a custom pass in the Inductor and
-        affects compilation caching. Its uuid depends on the UUIDs of all
-        dependent passes and the pass config. See InductorPass for more info.
-        """
-        passes = []
-
-        state: dict[str, Any] = {"pass_config": self.pass_config.compute_hash()}
-        for pass_ in self.passes:
-            passes.append(pass_.uuid())
-
-        passes.append(self.post_cleanup.uuid())
-        passes.append(self.ir_lowering.uuid())
-        passes.append(self.post_cleanup.uuid())
-        passes.append(self.fix_functionalization.uuid())
-
-        # Include the compile range in the uuid to ensure that inductor
-        # recompiles the graph for the new dynamic compile range.
-        state["compile_range"] = str(get_pass_context().compile_range)
-        state["passes"] = passes
-        return InductorPass.hash_dict(state)
+        try:
+            for pass_id, pass_ in self.passes:
+                if pass_.is_applicable_for_range(compile_range):
+                    pass_(graph)
+                    VllmInductorPass.dump_prefix += 1
+                else:
+                    logger.debug(
+                        "Skipping %s (%s) with compile range %s",
+                        pass_,
+                        pass_id,
+                        compile_range,
+                    )
+        finally:
+            VllmInductorPass.dump_prefix = None
+            VllmPatternMatcherPass.log_match_summary()

@@ -31,7 +31,7 @@ import torch._inductor.pattern_matcher as pm
 import torch.fx as fx
 from torch._inductor.pattern_matcher import PatternMatcherPass
 
-from vllm.config import VllmConfig
+from vllm.config import get_current_vllm_config
 from vllm.config.utils import Range
 from vllm.distributed import tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import (
@@ -231,8 +231,9 @@ class MiniMaxQKNormPass(VllmPatternMatcherPass):
     Only applied for decode-size compile ranges (small token counts).
     """
 
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
         self.disabled = True
 
         if _MINIMAX_QK_NORM_FUSED_OP is None:

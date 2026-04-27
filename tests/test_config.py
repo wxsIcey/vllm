@@ -49,6 +49,32 @@ def test_compile_config_repr_succeeds():
     assert "inductor_passes" in val
 
 
+def test_compilation_config_parses_explicit_pass_pipeline():
+    config = CompilationConfig(
+        pass_pipeline=[
+            "tests.compile.passes.test_pass_manager.ProperPass",
+            "vllm.compilation.passes.utility.post_cleanup.PostCleanupPass",
+        ]
+    )
+
+    assert config.pass_pipeline == [
+        "tests.compile.passes.test_pass_manager.ProperPass",
+        "vllm.compilation.passes.utility.post_cleanup.PostCleanupPass",
+    ]
+
+
+def test_backend_rejects_pass_manager_hook_override():
+    config = VllmConfig(
+        compilation_config=CompilationConfig(
+            inductor_compile_config={"post_grad_custom_post_pass": True}
+        )
+    )
+
+    backend = VllmBackend(config)
+    with pytest.raises(ValueError, match="reserved for the platform PassManager"):
+        backend.configure_post_pass()
+
+
 @pytest.mark.skip_global_cleanup
 def test_with_hf_config_populates_missing_architectures_from_causal_lm_mapping(
     monkeypatch,

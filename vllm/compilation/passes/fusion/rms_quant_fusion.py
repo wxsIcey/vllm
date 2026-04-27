@@ -10,7 +10,7 @@ from torch._inductor.pattern_matcher import PatternMatcherPass
 from torch._ops import OpOverload
 
 import vllm.ir.ops
-from vllm.config import VllmConfig, get_current_vllm_config
+from vllm.config import get_current_vllm_config
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     GroupShape,
@@ -597,8 +597,9 @@ class RMSNormQuantFusionPass(VllmPatternMatcherPass):
     """
 
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
 
         self.patterns: PatternMatcherPass = PatternMatcherPass(
             pass_name="rmsnorm_quant_fusion_pass"

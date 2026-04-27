@@ -7,7 +7,10 @@ import torch
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 from vllm._custom_ops import create_fp4_output_tensors
-from vllm.config import VllmConfig, get_layers_from_vllm_config
+from vllm.config import (
+    get_current_vllm_config,
+    get_layers_from_vllm_config,
+)
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention.mla_attention import MLAAttention
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
@@ -360,8 +363,9 @@ class MLAAttnQuantFusionPass(VllmFusionPatternMatcherPass):
     upon registration instead of during pattern matching.
     """
 
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config, "mla_attn_quant_fusion")
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__("mla_attn_quant_fusion")
 
         dtype = config.model_config.dtype
         layers = list(get_layers_from_vllm_config(config, MLAAttention).values())

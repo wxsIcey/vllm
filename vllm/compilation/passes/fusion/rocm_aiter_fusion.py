@@ -11,7 +11,7 @@ from torch._inductor.pattern_matcher import PatternMatcherPass
 import vllm.ir.ops
 import vllm.model_executor.layers.quantization.utils.fp8_utils  # noqa: F401
 from vllm._aiter_ops import rocm_aiter_ops
-from vllm.config import VllmConfig
+from vllm.config import get_current_vllm_config
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization.utils.quant_utils import (
     GroupShape,
@@ -293,8 +293,9 @@ class RocmAiterRMSNormQuantFusionPass(VllmPatternMatcherPass):
     """
 
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
 
         self.patterns: PatternMatcherPass = PatternMatcherPass(
             pass_name="rocm_aiter_rms_norm_quant_fusion_pass"
@@ -394,8 +395,9 @@ class RocmAiterSiluMulFp8GroupQuantFusionPass(VllmPatternMatcherPass):
     """
 
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
 
         self.patterns: PatternMatcherPass = PatternMatcherPass(
             pass_name="rocm_aiter_silu_mul_fp8_group_quant_fusion_pass"
@@ -495,8 +497,9 @@ class RocmAiterTritonAddRMSNormPadFusionPass(VllmPatternMatcherPass):
     with an triton_add_rmsnorm_pad op from AITER.
     """
 
-    def __init__(self, config: VllmConfig):
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
         self.patterns: PatternMatcherPass = PatternMatcherPass(
             pass_name="rocm_aiter_triton_add_rmsnorm_pad_fusion_pass"
         )
@@ -612,8 +615,8 @@ class MLADualRMSNormFusionPass(VllmFusionPatternMatcherPass):
     ``fused_qk_rmsnorm`` HIP kernel.
     """
 
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config, "mla_dual_rms_norm_fusion_pass")
+    def __init__(self) -> None:
+        super().__init__("mla_dual_rms_norm_fusion_pass")
 
         for epsilon in [1e-5, 1e-6]:
             self.register(MLADualRMSNormPattern(epsilon))

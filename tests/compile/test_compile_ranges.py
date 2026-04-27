@@ -14,6 +14,7 @@ from vllm.compilation.passes.inductor_pass import (
     InductorPass,
     get_pass_context,
 )
+from vllm.compilation.passes.pass_manager import PostGradPassManager
 from vllm.config import (
     VllmConfig,
     set_current_vllm_config,
@@ -47,6 +48,15 @@ def run_model(vllm_config: VllmConfig, model: nn.Module, batch_sizes: list[int])
         model(torch.randn(BATCH_SIZE, MLP_SIZE))
         for batch_size in batch_sizes:
             model(torch.randn(batch_size, MLP_SIZE))
+
+
+def prepend_to_default_pass_pipeline(
+    vllm_config: VllmConfig, *extra_passes: InductorPass
+) -> None:
+    vllm_config.compilation_config.pass_pipeline = [
+        *extra_passes,
+        *PostGradPassManager.default_pass_pipeline(vllm_config),
+    ]
 
 
 class PostGradRangeChecker(InductorPass):
@@ -88,11 +98,9 @@ def test_compile_ranges(use_fresh_inductor_cache):
             mode=CompilationMode.VLLM_COMPILE,
             compile_ranges_endpoints=[8, 32],
             compile_sizes=[16, 64, 128],
-            inductor_compile_config={
-                "post_grad_custom_post_pass": post_grad_range_checker,
-            },
         ),
     )
+    prepend_to_default_pass_pipeline(vllm_config, post_grad_range_checker)
 
     with set_current_vllm_config(vllm_config):
         model = TestModel(vllm_config=vllm_config, prefix="").eval()
@@ -183,11 +191,9 @@ def test_compile_sizes_produce_static_shapes(use_fresh_inductor_cache):
             mode=CompilationMode.VLLM_COMPILE,
             compile_ranges_endpoints=[8],
             compile_sizes=[16],
-            inductor_compile_config={
-                "post_grad_custom_post_pass": checker,
-            },
         ),
     )
+    prepend_to_default_pass_pipeline(vllm_config, checker)
 
     with set_current_vllm_config(vllm_config):
         model = TestModel(vllm_config=vllm_config, prefix="").eval()
@@ -227,16 +233,15 @@ def test_inductor_cache_compile_ranges(monkeypatch, use_fresh_inductor_cache):
     torch.set_default_device("cuda")
 
     def create_vllm_config():
-        return VllmConfig(
+        vllm_config = VllmConfig(
             scheduler_config=scheduler_config,
             compilation_config=CompilationConfig(
                 mode=CompilationMode.VLLM_COMPILE,
                 compile_ranges_endpoints=[8],
-                inductor_compile_config={
-                    "post_grad_custom_post_pass": post_grad_range_checker,
-                },
             ),
         )
+        prepend_to_default_pass_pipeline(vllm_config, post_grad_range_checker)
+        return vllm_config
 
     vllm_config_1 = create_vllm_config()
     with set_current_vllm_config(vllm_config_1):

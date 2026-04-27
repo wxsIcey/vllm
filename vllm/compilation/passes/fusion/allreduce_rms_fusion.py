@@ -15,7 +15,7 @@ import vllm.ir.ops
 from vllm.compilation.passes.fusion.rms_quant_fusion import (
     _rms_input_weight_dtype_match,
 )
-from vllm.config import VllmConfig
+from vllm.config import get_current_vllm_config
 from vllm.config.utils import Range
 from vllm.distributed import get_tp_group, tensor_model_parallel_all_reduce
 from vllm.distributed.parallel_state import (
@@ -740,8 +740,9 @@ class AllReduceFusedAddRMSNormStaticQuantNVFP4Pattern(BasePattern):
 
 
 class AllReduceFusionPass(VllmPatternMatcherPass):
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
         self.disabled = True
         self.tp_size = get_tensor_model_parallel_world_size()
         if self.tp_size <= 1:

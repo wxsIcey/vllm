@@ -404,6 +404,7 @@ class CompilationConfig:
         - [`inductor_compile_config`]
         [vllm.config.CompilationConfig.inductor_compile_config]
         - [`inductor_passes`][vllm.config.CompilationConfig.inductor_passes]
+        - [`pass_pipeline`][vllm.config.CompilationConfig.pass_pipeline]
         - custom inductor passes
 
     Why we have different sizes for cudagraph and inductor:
@@ -574,6 +575,17 @@ class CompilationConfig:
     name because the config uses JSON format. If we pass the config
     from Python, functions can also be passed directly via Python object
     constructor, e.g. `CompilationConfig(inductor_passes={"a": func})`."""
+
+    pass_pipeline: list[Any] | None = None
+    """Explicit full pass pipeline for the platform PassManager.
+
+    - `None`: derive the default pass list from `PassConfig`
+    - `list[...]`: use the provided ordered list verbatim
+
+    List entries can be:
+    - fully-qualified `InductorPass` class names
+    - Python `InductorPass` classes
+    """
 
     # CudaGraph compilation
     cudagraph_mode: CUDAGraphMode = None  # type: ignore[assignment]
@@ -845,6 +857,26 @@ class CompilationConfig:
         """Enable parsing of the `pass_config` field from a dictionary."""
         if isinstance(value, dict):
             return PassConfig(**value)
+        return value
+
+    @field_validator("pass_pipeline", mode="before")
+    @classmethod
+    def validate_pass_pipeline_before(cls, value: Any) -> Any:
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            return value
+
+        for item in value:
+            if isinstance(item, str):
+                continue
+            if isinstance(item, type) and issubclass(item, InductorPass):
+                continue
+            raise ValueError(
+                "pass_pipeline entries must be fully-qualified "
+                "InductorPass class names or InductorPass classes, "
+                f"got {item!r}"
+            )
         return value
 
     @field_validator("compile_cache_save_format")

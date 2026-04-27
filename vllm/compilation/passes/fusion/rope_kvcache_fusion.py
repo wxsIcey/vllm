@@ -8,7 +8,10 @@ from torch._higher_order_ops import auto_functionalized
 from torch._inductor.fx_passes.post_grad import view_to_reshape
 from torch._inductor.pattern_matcher import PatternMatcherPass
 
-from vllm.config import VllmConfig, get_layers_from_vllm_config
+from vllm.config import (
+    get_current_vllm_config,
+    get_layers_from_vllm_config,
+)
 from vllm.config.utils import Range
 from vllm.logger import init_logger
 from vllm.model_executor.layers.attention.attention import (
@@ -237,8 +240,9 @@ class RopeKVCacheFusionPass(VllmPatternMatcherPass):
     """
 
     @enable_fake_mode
-    def __init__(self, config: VllmConfig) -> None:
-        super().__init__(config)
+    def __init__(self) -> None:
+        config = get_current_vllm_config()
+        super().__init__()
 
         self.patterns: PatternMatcherPass = PatternMatcherPass(
             pass_name="rope_kv_cache_fusion_pass"
