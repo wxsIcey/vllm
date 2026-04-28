@@ -263,7 +263,7 @@ class MoERunner(MoERunnerInterface):
     def _replace_quant_method(self, quant_method: FusedMoEMethodBase):
         if self._shared_experts is not None:
             self._shared_experts._quant_method = quant_method
-        self.quant_method = quant_method
+        self._quant_method = quant_method
 
     def is_internal_router(self) -> bool:
         return self.gate is not None
