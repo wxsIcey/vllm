@@ -24,8 +24,6 @@ rms_norm_native = ir.ops.rms_norm.impls["native"].impl_fn
     reason="Currently only kernels on CUDA, ROCm and XPU",
 )
 def test_rms_norm_registration():
-    from vllm.triton_utils import HAS_TRITON
-
     expected = {
         "native": True,
         "vllm_c": current_platform.is_cuda_alike(),
@@ -34,7 +32,6 @@ def test_rms_norm_registration():
         and hasattr(torch.ops, "oink")
         and hasattr(torch.ops.oink, "rmsnorm"),
         "xpu_kernels": current_platform.is_xpu(),
-        "triton_batch_invariant": HAS_TRITON,
     }
 
     actual = {

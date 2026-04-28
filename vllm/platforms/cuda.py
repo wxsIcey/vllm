@@ -571,11 +571,12 @@ class CudaPlatformBase(Platform):
         using_inductor = cc.backend == "inductor" and cc.mode != CompilationMode.NONE
         default = ["native"] if using_inductor else ["vllm_c", "native"]
 
-        rms_norm = (
-            ["native"]
-            if using_inductor
-            else ["vllm_c", "triton_batch_invariant", "native"]
-        )
+        # Use oink if enabled for rms_norm
+        # TODO(Laurawly/luka): remove this env var,
+        #  users can just use IR op priority directly
+        rms_norm = default
+        if envs.VLLM_USE_OINK_OPS:
+            rms_norm = ["oink"] + default
 
         rotary_embedding = (
             ["vllm_c", "native"]
@@ -585,12 +586,6 @@ class CudaPlatformBase(Platform):
             )
             else list(default)
         )
-
-        # Use oink if enabled for rms_norm
-        # TODO(Laurawly/luka): remove this env var,
-        #  users can just use IR op priority directly
-        if envs.VLLM_USE_OINK_OPS:
-            rms_norm = ["oink"] + rms_norm
 
         return IrOpPriorityConfig.with_default(
             default,
