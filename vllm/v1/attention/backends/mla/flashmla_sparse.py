@@ -265,6 +265,7 @@ def get_prefill_workspace_size(max_model_len: int):
 
 class FlashMLASparseMetadataBuilder(AttentionMetadataBuilder[FlashMLASparseMetadata]):
     _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
+    supports_advance_step: bool = True
 
     def __init__(
         self,
@@ -407,6 +408,12 @@ class FlashMLASparseMetadataBuilder(AttentionMetadataBuilder[FlashMLASparseMetad
                     (max_num_batched_tokens, c128a_max_compressed),
                     dtype=torch.int32,
                     device=self.device,
+                )
+                # Pre-allocated req_id_per_token for advance_step: in single-token
+                # decode mode token i always belongs to req i, so this is a constant
+                # [0, 1, ..., max_num_seqs-1] arange.
+                self.decode_req_id_buffer = torch.arange(
+                    max_num_seqs, dtype=torch.int32, device=self.device
                 )
 
     def _build_fp8_mixed_decode_prefill(
@@ -706,6 +713,38 @@ class FlashMLASparseMetadataBuilder(AttentionMetadataBuilder[FlashMLASparseMetad
         if num_prefill_tokens > 0:
             result["c128a_prefill_topk_indices"] = prefill_local
         return result
+
+    def advance_step(
+        self,
+        metadata: "FlashMLASparseMetadata",
+        block_table: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        positions: torch.Tensor,
+        seq_lens: torch.Tensor,
+        num_reqs: int,
+    ) -> None:
+        """Update C128A topk indices in-place for the next draft decode step.
+
+        Non-C128A paths (compress_ratio != 128) have no additional
+        position-dependent buffers beyond slot_mapping and seq_lens, which are
+        already updated in-place by the caller, so this is a no-op for them.
+        """
+        if not (self.is_deepseek_v4 and self.compress_ratio == 128):
+            return
+        block_size = self.kv_cache_spec.block_size // self.compress_ratio
+        build_c128a_topk_metadata(
+            positions=positions[:num_reqs],
+            compress_ratio=self.compress_ratio,
+            num_decode_tokens=num_reqs,
+            token_to_req_indices=self.decode_req_id_buffer[:num_reqs],
+            block_table=block_table[:num_reqs],
+            block_size=block_size,
+            slot_mapping=slot_mapping[:num_reqs],
+            global_decode_buffer=self.c128a_global_decode_buffer,
+            decode_lens_buffer=self.c128a_decode_lens_buffer,
+            prefill_buffer=self.c128a_prefill_buffer,
+            max_compressed_tokens=self.c128a_max_compressed,
+        )
 
 
 class FlashMLASparseImpl(SparseMLAAttentionImpl[FlashMLASparseMetadata]):

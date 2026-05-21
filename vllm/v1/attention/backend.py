@@ -524,6 +524,10 @@ class AttentionMetadataBuilder(ABC, Generic[M]):
     # Does this backend/builder support updating the block table in existing
     # metadata
     supports_update_block_table: bool = False
+    # Does this backend/builder support CUDA-graph-safe in-place metadata
+    # advancement for Eagle draft decode steps?  Backends that set this to
+    # True must implement advance_step().
+    supports_advance_step: bool = False
 
     @abstractmethod
     def __init__(
@@ -647,6 +651,33 @@ class AttentionMetadataBuilder(ABC, Generic[M]):
             common_attn_metadata=common_attn_metadata,
             fast_build=True,
         )
+
+    def advance_step(
+        self,
+        metadata: M,
+        block_table: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        positions: torch.Tensor,
+        seq_lens: torch.Tensor,
+        num_reqs: int,
+    ) -> None:
+        """CUDA-graph-safe in-place update for Eagle draft decode steps.
+
+        Called once per draft step, before run_fullgraph(), to update
+        position-dependent pre-allocated GPU buffers without any CPU logic.
+
+        Prerequisites (caller guarantees):
+          - num_reqs unchanged from the previous build()/advance_step() call.
+          - max_query_len == 1 (single decode token per request).
+          - positions and seq_lens already incremented by 1 in-place.
+          - block_table structure is unchanged (no new blocks allocated).
+          - slot_mapping already updated by compute_slot_mappings() in-place.
+
+        Implementations must only perform in-place GPU tensor writes (Triton
+        or CUDA kernels). No Python-side tensor allocations, branches on GPU
+        state, or CPU/GPU synchronization are permitted.
+        """
+        raise NotImplementedError
 
     def use_cascade_attention(
         self,

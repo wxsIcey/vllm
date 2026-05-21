@@ -200,6 +200,7 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
     # Base threshold: query_len <= 1 is decode
     reorder_batch_threshold: int = 1
     _cudagraph_support: ClassVar[AttentionCGSupport] = AttentionCGSupport.UNIFORM_BATCH
+    supports_advance_step: bool = True
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -256,6 +257,16 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
             max_tokens,
             dtype=torch.bool,
             device=self.device,
+        )
+        # Pre-allocated buffers for CUDA-graph-safe advance_step().
+        # In single-token decode: token i belongs to req i, so
+        # query_start_loc[i] = i and token_to_req_indices[i] = i.
+        # Using one arange covers both; all tokens are valid by construction.
+        self._advance_arange = torch.arange(
+            max_tokens + 1, dtype=torch.int32, device=self.device
+        )
+        self._advance_all_valid = torch.ones(
+            max_tokens, dtype=torch.bool, device=self.device
         )
 
     def build(
@@ -346,6 +357,40 @@ class DeepseekSparseSWAMetadataBuilder(AttentionMetadataBuilder):
             tile_sched_c4a=tile_sched[_LAYER_TYPE_C4A],
             tile_sched_c128a=tile_sched[_LAYER_TYPE_C128A],
             **deepseek_v4_fields,
+        )
+
+    def advance_step(
+        self,
+        metadata: "DeepseekSparseSWAMetadata",
+        block_table: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        positions: torch.Tensor,
+        seq_lens: torch.Tensor,
+        num_reqs: int,
+    ) -> None:
+        """Update SWA indices/lens in-place for the next draft decode step.
+
+        In single-token decode mode (one query token per request), token i
+        always belongs to request i, so query_start_loc[i] = i.  Both the
+        query_start_loc and token_to_req_indices arrays can therefore be
+        served from the same pre-allocated arange tensor.
+        """
+        query_start_loc = self._advance_arange[: num_reqs + 1]
+        token_to_req = self._advance_arange[:num_reqs]
+        is_valid = self._advance_all_valid[:num_reqs]
+        _compute_swa_indices_and_lens_kernel[(num_reqs,)](
+            self.decode_swa_indices,
+            self.decode_swa_indices.stride(0),
+            self.decode_swa_lens,
+            self.window_size,
+            query_start_loc,
+            seq_lens,
+            token_to_req,
+            is_valid,
+            block_table,
+            block_table.stride(0),
+            self.block_size,
+            TRITON_BLOCK_SIZE=1024,
         )
 
     def build_tile_scheduler(

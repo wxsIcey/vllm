@@ -120,4 +120,17 @@ class DecodeEagleCudaGraphManager(EagleCudaGraphManagerBase):
             )
             return fwd, attn_state
 
-        super().capture(create_forward_fn, progress_bar_desc)
+        self._captured_attn_states = super().capture(
+            create_forward_fn, progress_bar_desc
+        )
+
+    def get_captured_attn_state(
+        self, desc: BatchExecutionDescriptor
+    ) -> CapturedAttentionState | None:
+        """Return the CapturedAttentionState recorded for the given descriptor.
+
+        Returns None when the descriptor was not captured (e.g. PIECEWISE
+        graphs whose attn_metadata is None, or if capture() has not been
+        called yet).
+        """
+        return getattr(self, "_captured_attn_states", {}).get(desc)

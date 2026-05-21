@@ -298,6 +298,7 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         else AttentionCGSupport.UNIFORM_BATCH
     )
     supports_update_block_table: bool = True
+    supports_advance_step: bool = True
 
     @classmethod
     def get_cudagraph_support(
@@ -584,6 +585,17 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
         new_metadata.block_table = blk_table
         new_metadata.slot_mapping = slot_mapping
         return new_metadata
+
+    def advance_step(
+        self,
+        metadata: FlashAttentionMetadata,
+        block_table: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        positions: torch.Tensor,
+        seq_lens: torch.Tensor,
+        num_reqs: int,
+    ) -> None:
+        pass  # slot_mapping and seq_lens already updated in-place by the caller
 
     def use_cascade_attention(self, *args, **kwargs) -> bool:
         return use_cascade_attention(*args, **kwargs)

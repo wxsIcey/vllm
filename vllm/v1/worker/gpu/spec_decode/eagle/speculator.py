@@ -180,6 +180,11 @@ class EagleSpeculator:
             active_layer_names=self.draft_attn_layer_names,
         )
         self.block_tables = block_tables
+        self._all_builders_support_advance_step = all(
+            attn_group.get_metadata_builder(0).supports_advance_step
+            for attn_group_list in self.attn_groups
+            for attn_group in attn_group_list
+        )
 
     @torch.inference_mode()
     def run_model(
@@ -296,6 +301,7 @@ class EagleSpeculator:
         num_tokens_across_dp: torch.Tensor | None,
     ) -> None:
         positions = self.input_buffers.positions[:num_reqs]
+        seq_lens = self.input_buffers.seq_lens[:num_reqs]
         query_start_loc = self.input_buffers.query_start_loc[: num_reqs + 1]
         idx_mapping = self.idx_mapping[:num_reqs]
 
@@ -303,10 +309,6 @@ class EagleSpeculator:
             attn_metadata = None
             slot_mappings_by_layer = None
             if not skip_attn:
-                # Build attention metadata and slot mappings for each draft
-                # decode step. It is necessary to rebuild the attention
-                # metadata even when replaying the FULL graph so that any
-                # attention metadata builder state is updated.
                 slot_mappings = self.block_tables.compute_slot_mappings(
                     idx_mapping,
                     query_start_loc,
@@ -316,11 +318,26 @@ class EagleSpeculator:
                 slot_mappings_by_layer = build_slot_mappings_by_layer(
                     slot_mappings, self.kv_cache_config
                 )
-                attn_metadata = self._build_draft_attn_metadata(
-                    num_reqs=num_reqs,
-                    num_reqs_padded=batch_desc.num_reqs or num_reqs,
-                    num_tokens_padded=batch_desc.num_tokens,
-                )
+
+                if (
+                    self._all_builders_support_advance_step
+                    and batch_desc.cg_mode == CUDAGraphMode.FULL
+                ):
+                    # Fast path: update only position-dependent GPU buffers
+                    # via pure Triton kernels — no CPU logic, no new Python
+                    # objects.  The CUDA graph reads through stable buffer
+                    # addresses and sees the freshly written values.
+                    self._advance_step_all_builders(
+                        slot_mappings, positions, seq_lens, num_reqs, batch_desc
+                    )
+                else:
+                    # Slow path: full metadata rebuild (also covers non-FULL
+                    # modes where advance_step is not needed).
+                    attn_metadata = self._build_draft_attn_metadata(
+                        num_reqs=num_reqs,
+                        num_reqs_padded=batch_desc.num_reqs or num_reqs,
+                        num_tokens_padded=batch_desc.num_tokens,
+                    )
 
             # Update the current draft step.
             self.current_draft_step.fill_(step)
@@ -382,6 +399,38 @@ class EagleSpeculator:
             self.max_model_len,
             self.num_speculative_steps,
         )
+
+    def _advance_step_all_builders(
+        self,
+        slot_mappings: torch.Tensor,
+        positions: torch.Tensor,
+        seq_lens: torch.Tensor,
+        num_reqs: int,
+        batch_desc: BatchExecutionDescriptor,
+    ) -> None:
+        """Call advance_step() on every attention metadata builder.
+
+        slot_mappings is a 2-D tensor [num_kv_cache_groups, num_tokens].
+        Each builder receives the slice for its own KV cache group.
+        """
+        assert self.decode_cudagraph_manager is not None
+        attn_state = self.decode_cudagraph_manager.get_captured_attn_state(batch_desc)
+        if attn_state is None or attn_state.attn_metadata is None:
+            return
+        captured_metadata = attn_state.attn_metadata
+
+        for group_idx, attn_group_list in enumerate(self.attn_groups):
+            for attn_group in attn_group_list:
+                builder = attn_group.get_metadata_builder(0)
+                metadata = captured_metadata[attn_group.layer_names[0]]
+                builder.advance_step(
+                    metadata=metadata,
+                    block_table=self.block_tables.input_block_tables[group_idx],
+                    slot_mapping=slot_mappings[group_idx],
+                    positions=positions,
+                    seq_lens=seq_lens,
+                    num_reqs=num_reqs,
+                )
 
     def _build_draft_attn_metadata(
         self,
