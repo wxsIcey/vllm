@@ -100,10 +100,14 @@ def _prepare_prefill_inputs_kernel(
 
     tl.store(last_token_indices_ptr + req_idx, out_start + num_valid)
     tl.store(out_query_start_loc_ptr + req_idx, out_start)
-    # FIX: seq_len + 1 was wrong — includes rejected tokens.
-    # Correct: the draft model has seen (num_valid + 1 correction) tokens,
-    # i.e. seq_len - num_rejected + 1.
-    new_seq_len = tl.minimum(seq_len - num_rejected + 1, max_model_len)
+    # seqlen_k for the expanded prefill attention:
+    #   pre_existing = seq_len - query_len (draft KV before this round)
+    #   expanded_query_len = query_len + 1 (adds correction token)
+    #   seqlen_k = pre_existing + expanded_query_len = seq_len + 1
+    # num_rejected does NOT change seqlen_k — the expanded query always has
+    # query_len+1 slots (rejected ones are masked with PAD_SLOT_ID, so they
+    # don't write KV but still occupy query positions).
+    new_seq_len = tl.minimum(seq_len + 1, max_model_len)
     tl.store(out_seq_lens_ptr + req_idx, new_seq_len)
 
     if req_idx == num_reqs - 1:
@@ -335,6 +339,11 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
                 max_model_len=self.max_model_len,
             )
 
+            # if num_reqs >= 1:
+            #     print(f"[expanded_ids] {self.expanded_input_ids[:total_expanded].tolist()}")
+            #     print(f"[expanded_pos] {self.expanded_positions[:total_expanded].tolist()}")
+            #     print(f"[target] seq_lens={input_batch.seq_lens[:num_reqs].tolist()} num_rejected={num_rejected[:num_reqs].tolist()}")
+
             prefill_slot_mappings = block_tables.compute_slot_mappings(
                 input_batch.idx_mapping,
                 self.input_buffers.query_start_loc[: num_reqs + 1],
@@ -348,6 +357,10 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
             prefill_slot_maps_by_layer = build_slot_mappings_by_layer(
                 prefill_slot_mappings, kv_cache_config
             )
+
+            # if num_reqs >= 1:
+            #     draft_keys = [k for k in prefill_slot_maps_by_layer if 'draft_model' in k]
+            #     print(f"[slot_map] total={len(prefill_slot_maps_by_layer)} draft={len(draft_keys)} sample={draft_keys[:2]}")
 
             qsl_np = input_batch.query_start_loc_np
             query_start_loc_cpu_expanded = (
@@ -371,7 +384,7 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
                 slot_mappings=prefill_slot_mappings,
                 kv_cache_config=kv_cache_config,
             )
-
+            # prefill是自己走了一遍前向，采样得到d1,但是没更新序列长度和query_start_loc
             batch_descriptor = BatchDescriptor(num_tokens=total_expanded)
             with set_forward_context(
                 attn_md_0,
@@ -421,12 +434,13 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
             last_positions = self.expanded_positions[self.last_token_indices[:num_reqs]]
 
         self.input_buffers.positions[:num_reqs].copy_(last_positions)
-        # The decode loop increments seq_lens BEFORE each forward, so the
-        # initial value should be target_seq_lens - num_rejected (without +1),
-        # giving target - rejected + 1 on the first step (correct).
+        # The decode loop increments seq_lens BEFORE each forward.
+        # Initial seq_lens = target_seq_lens - num_rejected + 1.
+        # Step 1 forward uses      target_seq_lens - num_rejected + 2.
+        # Step 2 forward uses      target_seq_lens - num_rejected + 3.
         self.input_buffers.seq_lens[:num_reqs].copy_(
             torch.clamp(
-                input_batch.seq_lens[:num_reqs] - num_rejected[:num_reqs].int(),
+                input_batch.seq_lens[:num_reqs] - num_rejected[:num_reqs].int() + 1,
                 max=self.max_model_len,
             )
         )
@@ -473,6 +487,11 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
                 decode_attn_md = self._build_draft_attn_metadata(
                     num_reqs, num_reqs, num_reqs
                 )
+                # if _dbg:
+                #     sample_key = next(iter(decode_attn_md))
+                #     sample_meta = decode_attn_md[sample_key]
+                #     bt = sample_meta.block_table
+                #     print(f"[decode_attn step={step}] seq_lens={self.input_buffers.seq_lens[:num_reqs].tolist()} block_table={bt[0, :4].tolist()} slot={step_slot_mappings[0, 0].item()}")
                 hidden_states = self._run_model(
                     num_reqs,
                     decode_attn_md,
