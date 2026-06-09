@@ -350,6 +350,9 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
                 self.expanded_positions[:total_expanded],
                 total_expanded,
             )
+            if not skip_attn:
+                print(f"[step 0 slots] req0={prefill_slot_mappings[0, :6].tolist()}")
+                print(f"[prefill seq_len] {self.input_buffers.seq_lens[:num_reqs].tolist()}")
             # Mask rejected positions so they do not pollute the KV cache.
             is_rejected = self.is_rejected_mask[:total_expanded]
             prefill_slot_mappings[:, is_rejected] = PAD_SLOT_ID
@@ -450,6 +453,18 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
 
         idx_mapping = input_batch.idx_mapping
 
+        # DEBUG: print initial decode state (first request only)
+        _dbg = not skip_attn and num_reqs >= 1
+        if _dbg:
+            _nr = input_batch.num_rejected[:num_reqs] if hasattr(input_batch, 'num_rejected') else None
+            print(
+                f"[draft decode INIT] "
+                f"target_seq_lens={input_batch.seq_lens[:num_reqs].tolist()} "
+                f"num_rejected={num_rejected[:num_reqs].tolist()} "
+                f"init_seq_lens(target-rejected)={self.input_buffers.seq_lens[:num_reqs].tolist()} "
+                f"init_positions={self.input_buffers.positions[:num_reqs].tolist()}"
+            )
+
         for step in range(1, self.num_speculative_steps):
             self.input_buffers.input_ids[:num_reqs].copy_(
                 self.draft_tokens[:num_reqs, step - 1].int()
@@ -467,6 +482,14 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
                 out=self.input_buffers.seq_lens[:num_reqs],
             )
 
+            if _dbg:
+                print(
+                    f"[draft decode step={step}] "
+                    f"input_ids={self.input_buffers.input_ids[:num_reqs].tolist()} "
+                    f"positions={self.input_buffers.positions[:num_reqs].tolist()} "
+                    f"seq_lens={self.input_buffers.seq_lens[:num_reqs].tolist()}"
+                ) # 注意： 这个seq_len是指已写入KV cache 的 token 数量
+
             if skip_attn:
                 hidden_states = self._run_model(
                     num_reqs, None, None, num_tokens_across_dp
@@ -481,6 +504,9 @@ class PlainDraftModelSpeculator(DraftModelSpeculator):
                 step_slot_mappings = block_tables.compute_slot_mappings(
                     idx_mapping, q_start, positions, num_reqs
                 )
+                # 加这一行
+                if _dbg:
+                    print(f"[step={step}] slot={step_slot_mappings[0, 0].item()} pos={positions[0].item()}")
                 step_slot_maps_by_layer = build_slot_mappings_by_layer(
                     step_slot_mappings, kv_cache_config
                 )
