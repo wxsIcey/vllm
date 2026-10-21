@@ -172,6 +172,7 @@ class StandaloneARSpeculator(DraftModelSpeculator):
         num_reqs: int,
         skip_attn: bool,
         num_tokens_across_dp: torch.Tensor | None,
+        debug: bool = False,
     ) -> None:
         if skip_attn:
             src_tokens = input_batch.num_tokens
@@ -231,6 +232,17 @@ class StandaloneARSpeculator(DraftModelSpeculator):
             prefill_slot_maps_by_layer = build_slot_mappings_by_layer(
                 prefill_slot_mappings, kv_cache_config
             )
+            if debug:
+                input_ids = (
+                    self.expanded_input_ids[:total_expanded].detach().cpu().tolist()
+                )
+                positions = (
+                    self.expanded_positions[:total_expanded].detach().cpu().tolist()
+                )
+                print(
+                    f"[draft-debug] step=0 input_ids={input_ids} positions={positions}",
+                    flush=True,
+                )
             hidden_states = self._run_model(
                 self.expanded_input_ids[:total_expanded],
                 self.expanded_positions[:total_expanded],
@@ -250,6 +262,7 @@ class StandaloneARSpeculator(DraftModelSpeculator):
             self.seeds,
             self.current_draft_step,
             self.draft_logits,
+            debug=debug,
         )
 
     def _multi_step_decode(
@@ -259,6 +272,7 @@ class StandaloneARSpeculator(DraftModelSpeculator):
         num_reqs: int,
         skip_attn: bool,
         num_tokens_across_dp: torch.Tensor | None,
+        debug: bool = False,
     ) -> None:
         if skip_attn:
             last_positions = input_batch.positions[
@@ -329,6 +343,18 @@ class StandaloneARSpeculator(DraftModelSpeculator):
                     # Include the correction token inserted during prefill.
                     step=step + 1,
                 )
+            if debug:
+                input_ids = (
+                    self.input_buffers.input_ids[:num_reqs].detach().cpu().tolist()
+                )
+                positions = (
+                    self.input_buffers.positions[:num_reqs].detach().cpu().tolist()
+                )
+                print(
+                    f"[draft-debug] step={step} "
+                    f"input_ids={input_ids} positions={positions}",
+                    flush=True,
+                )
             hidden_states = self._run_model(
                 self.input_buffers.input_ids[:num_reqs],
                 self.input_buffers.positions[:num_reqs],
@@ -346,6 +372,7 @@ class StandaloneARSpeculator(DraftModelSpeculator):
                 self.seeds,
                 self.current_draft_step,
                 self.draft_logits,
+                debug=debug,
             )
 
     @torch.inference_mode()
@@ -372,6 +399,7 @@ class StandaloneARSpeculator(DraftModelSpeculator):
         assert self.model is not None
 
         num_reqs = input_batch.num_reqs
+        debug_propose = num_reqs == 1 and not dummy_run and not is_profile
         skip_attn = dummy_run and skip_attn_for_dummy_run
         num_tokens_across_dp = (
             dp_sync_state.num_tokens_across_dp if dp_sync_state is not None else None
@@ -393,20 +421,23 @@ class StandaloneARSpeculator(DraftModelSpeculator):
             num_reqs,
             skip_attn,
             num_tokens_across_dp,
+            debug=debug_propose,
         )
 
         if self.num_speculative_steps == 1:
-            return self.draft_tokens[:num_reqs, :1]
+            proposed_tokens = self.draft_tokens[:num_reqs, :1]
+        else:
+            self._multi_step_decode(
+                input_batch,
+                num_rejected,
+                num_reqs,
+                skip_attn,
+                num_tokens_across_dp,
+                debug=debug_propose,
+            )
+            proposed_tokens = self.draft_tokens[:num_reqs]
 
-        self._multi_step_decode(
-            input_batch,
-            num_rejected,
-            num_reqs,
-            skip_attn,
-            num_tokens_across_dp,
-        )
-
-        return self.draft_tokens[:num_reqs]
+        return proposed_tokens
 
 
 @triton.jit

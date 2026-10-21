@@ -448,7 +448,10 @@ class DraftModelSpeculator(BaseSpeculator):
         draft_logits: torch.Tensor | None,
         spec_step_idx: int = 0,
         num_steps: int = 1,
+        debug: bool = False,
     ) -> torch.Tensor:
+        if debug:
+            print("draft_hidden:", hidden_states[0].detach().cpu().tolist(), flush=True)
         if draft_logits is None and self.use_local_argmax_reduction:
             return self.get_draft_top_tokens(hidden_states, spec_step_idx)
 
@@ -473,6 +476,16 @@ class DraftModelSpeculator(BaseSpeculator):
             )
         else:
             sampled = logits.argmax(dim=-1)
+        if debug:
+            top5_logits, top5_ids = logits[0].topk(min(5, logits.shape[-1]))
+            print(
+                f"[draft-debug] step={int(draft_step.detach().cpu().item())} "
+                f"pos={sample_src_positions.detach().cpu().tolist()} "
+                f"top5_ids={top5_ids.detach().cpu().tolist()} "
+                f"top5_logits={top5_logits.detach().cpu().tolist()} "
+                f"proposed={sampled.detach().cpu().tolist()}",
+                flush=True,
+            )
         self._maybe_predict_acceptance(logits, idx_mapping, draft_step)
         return sampled
 
