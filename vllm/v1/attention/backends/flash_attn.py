@@ -1399,6 +1399,56 @@ class FlashAttentionImpl(AttentionImpl):
                 block_table = block_table[:, :num_pages]
                 num_splits = 1
 
+            layer_name = getattr(layer, "layer_name", "")
+            debug_flash_attn = (
+                "draft_model" in layer_name
+                and ".layers.0." in layer_name
+                and not getattr(self, "_debug_flash_attn_printed", False)
+                and cu_seqlens_q.numel() == 2
+            )
+            if debug_flash_attn:
+                kv_len = int(seqused_k[0].detach().cpu().item())
+                block_size = key_cache.shape[1]
+                num_blocks = min(
+                    block_table.shape[1],
+                    (kv_len + block_size - 1) // block_size,
+                )
+                block_ids = block_table[0, :num_blocks].to(
+                    device=key_cache.device, dtype=torch.long
+                )
+                positions = torch.arange(kv_len, device=key_cache.device)
+                logical_blocks = block_ids[positions // block_size]
+                block_offsets = positions % block_size
+                logical_key = key_cache[logical_blocks, block_offsets]
+                logical_value = value_cache[logical_blocks, block_offsets]
+                print(
+                    f"[fa-debug] layer={layer_name} "
+                    f"fa_version={self.vllm_flash_attn_version} "
+                    f"q_shape={tuple(query[:num_actual_tokens].shape)} "
+                    f"q_dtype={query.dtype} "
+                    f"cu_seqlens_q={cu_seqlens_q.detach().cpu().tolist()} "
+                    f"seqused_k={seqused_k.detach().cpu().tolist()} "
+                    f"max_seqlen_q={max_seqlen_q} max_seqlen_k={max_seqlen_k} "
+                    f"block_size={block_size} "
+                    f"block_table={block_ids.detach().cpu().tolist()} "
+                    f"scale={self.scale} causal={causal} "
+                    f"window={sliding_window_size} softcap={self.logits_soft_cap} "
+                    f"num_splits={num_splits}",
+                    flush=True,
+                )
+                print(
+                    f"[fa-debug] op_input "
+                    f"Q_shape={tuple(query[:num_actual_tokens].shape)} "
+                    f"Q={query[:num_actual_tokens].detach().cpu().tolist()} "
+                    f"logical_K_shape={tuple(logical_key.shape)} "
+                    f"dtype={logical_key.dtype} "
+                    f"logical_K={logical_key.detach().cpu().tolist()} "
+                    f"logical_V_shape={tuple(logical_value.shape)} "
+                    f"dtype={logical_value.dtype} "
+                    f"logical_V={logical_value.detach().cpu().tolist()}",
+                    flush=True,
+                )
+
             _FA4_DENSE_ATTENTION_KERNEL(
                 q=query[:num_actual_tokens],
                 k=key_cache,
@@ -1425,6 +1475,15 @@ class FlashAttentionImpl(AttentionImpl):
                 mask_mod=rswa_mask_mod_fn or mm_mask_mod,
                 aux_tensors=rswa_aux or mm_aux,
             )
+            if debug_flash_attn:
+                print(
+                    f"[fa-debug] op_output "
+                    f"shape={tuple(output[:num_actual_tokens].shape)} "
+                    f"dtype={output.dtype} "
+                    f"{output[:num_actual_tokens].detach().cpu().tolist()}",
+                    flush=True,
+                )
+                self._debug_flash_attn_printed = True
             return output
 
     def do_kv_cache_update(

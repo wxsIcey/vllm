@@ -429,6 +429,14 @@ class Qwen2Model(nn.Module, EagleModelMixin):
             start=self.start_layer,
         ):
             hidden_states, residual = layer(positions, hidden_states, residual)
+            if positions.numel() == 6 and positions[-1].item() == 5:
+                model_name = getattr(self.config, "_name_or_path", "unknown")
+                print(
+                    f"[layer-debug] model={model_name} layer={idx} pos=5 "
+                    f"hidden={hidden_states[5, :8].detach().cpu().tolist()} "
+                    f"residual={residual[5, :8].detach().cpu().tolist()}",
+                    flush=True,
+                )
             self._maybe_add_hidden_state(
                 aux_hidden_states, idx + 1, hidden_states, residual
             )
