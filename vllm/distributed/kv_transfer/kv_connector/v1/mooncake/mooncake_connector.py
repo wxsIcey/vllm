@@ -47,6 +47,9 @@ from vllm.distributed.kv_transfer.kv_connector.v1.mooncake.mooncake_utils import
     MooncakeBootstrapServer,
     RegisterWorkerPayload,
 )
+from vllm.distributed.kv_transfer.kv_connector.v1.mooncake.registration import (
+    plan_kv_cache_memory_regions,
+)
 from vllm.distributed.kv_transfer.kv_connector.v1.mooncake.stats import (
     MooncakeKVConnectorStats,
     MooncakePromMetrics,
@@ -2086,10 +2089,8 @@ class MooncakeConnectorWorker:
         """Register the KV Cache data in mooncake."""
         logger.info("Registering KV_Caches. use_mla: %s", self.use_mla)
 
-        kv_data_ptrs: list[int] = []
-        kv_data_lens: list[int] = []
+        registration_tensors: list[torch.Tensor] = []
         region_base_addresses: list[int] = []
-        seen_storage_ptrs: set[int] = set()
         self.block_len_per_layer = []
         self.kv_block_len_per_layer = []
         self.registered_layer_names = []
@@ -2124,12 +2125,9 @@ class MooncakeConnectorWorker:
             # recurrent states, unpacked only when binding the cache for execution.
             self._log_debug_cache_registration(layer_name, cache)
             group_index = self.kv_cache_config.transfer_group_index_by_layer[layer_name]
+            registration_tensors.append(cache)
             storage = cache.untyped_storage()
             storage_addr = storage.data_ptr()
-            if storage_addr not in seen_storage_ptrs:
-                seen_storage_ptrs.add(storage_addr)
-                kv_data_ptrs.append(storage_addr)
-                kv_data_lens.append(storage.nbytes())
 
             is_mla_region = isinstance(
                 layer_spec, (MLAAttentionSpec, SlidingWindowMLASpec)
@@ -2267,6 +2265,11 @@ class MooncakeConnectorWorker:
                 self.region_row_offsets.append(-1)
 
         self.kv_caches_base_addr = region_base_addresses
+        registration_regions = plan_kv_cache_memory_regions(
+            registration_tensors, current_platform
+        )
+        kv_data_ptrs = [region.address for region in registration_regions]
+        kv_data_lens = [region.size_bytes for region in registration_regions]
         self.seen_base_addresses = kv_data_ptrs
         self._kv_data_lens = kv_data_lens
 

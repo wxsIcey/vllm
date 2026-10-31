@@ -608,6 +608,36 @@ class Platform:
         raise NotImplementedError
 
     @classmethod
+    def get_mooncake_memory_registration_regions(
+        cls, storage_regions: tuple[tuple[int, int], ...]
+    ) -> tuple[tuple[int, int], ...]:
+        """Return physical regions to register for Mooncake.
+
+        Each input pair is a PyTorch storage's ``(base_address, size_bytes)``.
+        A platform may recover an allocator-owned registration range around a
+        storage, but every returned range must cover one or more complete input
+        regions and may include only memory owned by those allocations.
+        """
+        return storage_regions
+
+    @classmethod
+    def coalesce_mooncake_memory_registration_regions(
+        cls, regions: tuple[tuple[int, int], ...]
+    ) -> tuple[tuple[int, int], ...]:
+        """Combine Mooncake registration ranges when the platform permits it.
+
+        The default planner merges overlapping ranges. Overrides may merge
+        adjacent or more distant ranges only when the complete result is safe
+        to register as one physical memory region.
+        """
+        return regions
+
+    @classmethod
+    def get_mooncake_memory_registration_region_limit(cls) -> int | None:
+        """Return the maximum number of Mooncake registration regions, if any."""
+        return None
+
+    @classmethod
     def get_all_gpu_pci_bus_ids(cls) -> dict[int, str]:
         """Return a mapping of device index to PCI bus ID string.
 
