@@ -229,7 +229,6 @@ from vllm.v1.worker.utils import (
 )
 from vllm.v1.worker.workspace import lock_workspace
 
-from .gpu.pp_utils import get_pp_all_gather_tensors
 from .utils import (
     AttentionGroup,
     KVBlockZeroer,
@@ -4312,7 +4311,6 @@ class GPUModelRunner(
                     get_pp_group().send_tensor_dict(
                         hidden_states.tensors,
                         all_gather_group=get_tp_group(),
-                        all_gather_tensors=get_pp_all_gather_tensors(self.vllm_config),
                     )
                     logits = None
                 else:
