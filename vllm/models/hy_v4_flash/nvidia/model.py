@@ -16,7 +16,10 @@ from vllm.models.hy_v4.nvidia.model import (
     HYV4Model,
     IHCCarry,
 )
-from vllm.models.hy_v4.weight_utils import HYV4_MLP_MAPPER
+from vllm.models.hy_v4.weight_utils import (
+    HYV4_MLP_MAPPER,
+    HYV4_PACKED_MODULES_MAPPING,
+)
 from vllm.models.hy_v4_flash.common.model import (
     HYV4FlashForCausalLMMixin,
     HYV4FlashModelMixin,
@@ -151,10 +154,12 @@ class HYV4FlashForCausalLM(HYV4FlashForCausalLMMixin, HYV4ForCausalLM):
     supports_lora = False  # type: ignore[assignment]
     supports_pp = False  # type: ignore[assignment]
     requires_raw_input_tokens = True
-    packed_modules_mapping = {"gate_up_proj": ["gate_proj", "up_proj"]}
+    packed_modules_mapping = HYV4_PACKED_MODULES_MAPPING
     hf_to_vllm_mapper = HYV4_MLP_MAPPER | WeightsMapper(
         orig_to_new_substr={".compressed_indexer.": ".indexer."},
         orig_to_new_stacked={
+            ".q_a_proj": (".fused_qkv_a_proj", 0),
+            ".kv_a_proj_with_mqa": (".fused_qkv_a_proj", 1),
             ".indexer.key_value_projection.": (".indexer.key_projection.", 0),
             ".indexer.key_gate_projection.": (".indexer.key_projection.", 1),
         },
